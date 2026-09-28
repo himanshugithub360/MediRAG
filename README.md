@@ -1,4 +1,4 @@
-# 🩺 AI Medical Chatbot
+# 🩺MediRAG
 
 An AI-powered Medical Chatbot built using **Flask + LangChain + Mistral AI + Pinecone + HuggingFace Embeddings + RAG Architecture**.
 
