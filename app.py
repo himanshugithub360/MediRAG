@@ -7,9 +7,13 @@ from langchain_pinecone import PineconeVectorStore
 from langchain_mistralai import ChatMistralAI
 from collections import OrderedDict
 from dotenv import load_dotenv
-from src.config import INDEX_NAME, NAMESPACE
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from src.config import (CHAT_RATE_LIMIT, INDEX_NAME, MIN_RELEVANCE_SCORE, MISTRAL_MIN_INTERVAL,
+                        NAMESPACE)
 from src.helper import download_hugging_face_embeddings
 from src.retrieval import build_retriever
+from src import safety
 import os
 import re
 import secrets
@@ -26,6 +30,18 @@ MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
 # Without a fixed key, sessions reset whenever the server restarts — fine for local use
 app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
+# Per-visitor rate limit on /chat (in memory; resets when the server restarts)
+limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
+
+
+@app.errorhandler(429)
+def rate_limited(e):
+    return jsonify({
+        "response": "⏳ You're sending messages too quickly. Please wait a minute and try again.",
+        "kind": "rate_limited",
+    }), 429
+
+
 missing = [k for k, v in {'PINECONE_API_KEY': PINECONE_API_KEY, 'MISTRAL_API_KEY': MISTRAL_API_KEY}.items() if not v]
 if missing:
     raise SystemExit(f"Missing environment variables: {', '.join(missing)}. Add them to your .env file.")
@@ -40,6 +56,9 @@ system_prompt = (
     "Your role is to provide accurate, evidence-based medical information based strictly on the provided context. "
     "Be concise, clear, and compassionate. If the context does not contain enough information to answer, say so honestly. "
     "Never fabricate medical facts. Always recommend consulting a real doctor for diagnosis or treatment. "
+    "Never give specific doses or dosing schedules, never tell the user which medicine they personally "
+    "should take, start, stop or change, and never diagnose the user; you may explain what medicines are "
+    "generally used for, how they work, and their side effects and interactions. "
     "For emotional statements, acknowledge the person's feelings first before providing information.\n"
     "The reference passages below were retrieved from medical reference books by the system; the user did not "
     "write or provide them, so never refer to them as something the user said or shared. "
@@ -126,10 +145,26 @@ def to_messages(history):
     return [HumanMessage(text) if role == "human" else AIMessage(text) for role, text in history]
 
 
+_mistral_lock = threading.Lock()
+_last_mistral_call = 0.0
+
+
+def wait_for_mistral_slot():
+    """Space Mistral calls at least MISTRAL_MIN_INTERVAL apart across all users and threads.
+    The free tier allows ~1 request/second, so this prevents most 429 errors up front."""
+    global _last_mistral_call
+    with _mistral_lock:
+        wait = _last_mistral_call + MISTRAL_MIN_INTERVAL - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _last_mistral_call = time.monotonic()
+
+
 def invoke_with_retry(chain, inputs, attempts=3):
-    """The Mistral free tier allows ~1 request/second; back off briefly on 429s."""
+    """Throttle Mistral calls, and back off briefly if a 429 still happens."""
     for attempt in range(attempts):
         try:
+            wait_for_mistral_slot()
             return chain.invoke(inputs)
         except Exception as e:
             if "429" in str(e) and attempt < attempts - 1:
@@ -185,15 +220,38 @@ def index():
     return render_template('chat.html')
 
 
-@app.route("/chat", methods=["POST"])
-def chat():
+def _request_message():
     data = request.get_json(silent=True) or {}
-    user_message = str(data.get("message", "")).strip()
+    return str(data.get("message", "")).strip()
+
+
+def _is_urgent_request():
+    """Emergency and crisis messages are never rate-limited."""
+    return safety.check_message(_request_message()).kind in (safety.EMERGENCY, safety.CRISIS)
+
+
+@app.route("/chat", methods=["POST"])
+@limiter.limit(CHAT_RATE_LIMIT, exempt_when=_is_urgent_request)
+def chat():
+    user_message = _request_message()
 
     if not user_message:
         return jsonify({"response": "Please enter a message."})
 
     conv_id = get_conversation_id()
+
+    # Safety checks run before anything else, and skip the AI entirely when they trigger
+    check = safety.check_message(user_message)
+    canned = {
+        safety.CRISIS: safety.crisis_response,
+        safety.EMERGENCY: lambda: safety.emergency_response(check.category),
+        safety.DOSAGE: safety.dosage_response,
+    }.get(check.kind)
+    if canned:
+        reply = canned()
+        app.logger.info("Safety rule '%s' (%s) triggered", check.kind, check.category or "-")
+        append_history(conv_id, user_message, reply)
+        return jsonify({"response": reply, "kind": check.kind})
 
     reply = quick_reply(user_message)
     if reply:
@@ -219,6 +277,15 @@ def chat():
 
         docs = retriever.invoke(search_query)
 
+        # Don't let the model guess when the reference books have nothing relevant
+        best_score = docs[0].metadata.get("relevance_score") if docs else None
+        if not docs or (best_score is not None and best_score < MIN_RELEVANCE_SCORE):
+            app.logger.info("Low relevance (best score %s) for %r; declining to answer",
+                            best_score, search_query)
+            reply = safety.low_confidence_response()
+            append_history(conv_id, user_message, reply)
+            return jsonify({"response": reply, "kind": "low_confidence", "notice": check.notice})
+
         bot_response = invoke_with_retry(question_answer_chain, {
             "input": user_message,
             "chat_history": chat_history,
@@ -234,7 +301,7 @@ def chat():
         return jsonify({"response": "I'm having trouble processing that request. Please try again."})
 
     append_history(conv_id, user_message, bot_response)
-    return jsonify({"response": bot_response, "sources": format_sources(docs)})
+    return jsonify({"response": bot_response, "sources": format_sources(docs), "notice": check.notice})
 
 
 def format_sources(docs):

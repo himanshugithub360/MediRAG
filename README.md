@@ -16,10 +16,12 @@ Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augment
 6. [Setup (step by step)](#setup-step-by-step)
 7. [Running the app](#running-the-app)
 8. [Using the chatbot](#using-the-chatbot)
-9. [Configuration reference](#configuration-reference)
-10. [API reference](#api-reference)
-11. [Troubleshooting](#troubleshooting)
-12. [Customisation ideas](#customisation-ideas)
+9. [Safety features](#safety-features)
+10. [Configuration reference](#configuration-reference)
+11. [API reference](#api-reference)
+12. [Running the tests](#running-the-tests)
+13. [Troubleshooting](#troubleshooting)
+14. [Customisation ideas](#customisation-ideas)
 
 ---
 
@@ -30,6 +32,11 @@ Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augment
 - 📖 **Sources shown under every answer** (book + page number)
 - 🔎 **Hybrid search**: meaning-based vector search (Pinecone) + keyword search (BM25), so exact drug and disease names are always found
 - 🎯 **Reranking**: a cross-encoder model picks the 5 best passages out of ~40 candidates
+- 🚨 **Emergency detection**: chest pain, stroke signs, overdose and similar emergencies get emergency numbers (112 / 108) immediately, without waiting for the AI
+- 💙 **Crisis support**: messages about suicide or self-harm get the Tele-MANAS helpline (14416) right away
+- 💊 **No personal dosing or prescribing**: requests like *"how much paracetamol should I take?"* are politely declined
+- 🙅 **Won't guess**: if the books have nothing relevant, the bot says so instead of making something up
+- ⏳ **Rate limiting**: protects the app and keeps Mistral's free-tier limit from being hit
 - 📏 **Built-in retrieval evaluation** (`eval_retrieval.py`) to measure changes with numbers
 - 🧠 Conversation memory: follow-ups like *"what are its treatments?"* are understood in context
 - ⚡ Instant replies for greetings like "hi", "thanks", "bye" (no API call needed)
@@ -81,7 +88,10 @@ AI Medical-chatbot/
 │   ├── config.py        # Shared settings: index, namespace, chunk size, models, k values
 │   ├── helper.py        # PDF loading + cleaning, chunking, embeddings, chunk file I/O
 │   ├── retrieval.py     # Hybrid search (vector + BM25) and cross-encoder reranking
+│   ├── safety.py        # Emergency, crisis and dosage detection + their responses
 │   └── prompt.py        # Alternative/basic system prompt (not used by app.py)
+├── tests/
+│   └── test_safety.py   # 49 tests for the safety rules (python -m pytest -q)
 ├── templates/
 │   └── chat.html        # Chat UI (HTML, CSS and JavaScript in one file)
 ├── static/              # Favicons, web manifest, style.css
@@ -90,6 +100,7 @@ AI Medical-chatbot/
 ├── research/
 │   └── trials.ipynb     # Notebook used to experiment while building the project
 ├── requirements.txt     # Python dependencies
+├── requirements-dev.txt # + pytest, for running the tests
 ├── setup.py             # Makes `src` installable as a package (pip install -e .)
 ├── template.py          # Scaffolding script that created the initial folder layout
 └── .env                 # Your API keys (NOT committed — you create this)
@@ -285,6 +296,30 @@ Running without activating the venv (Windows):
 - Messages that are *only* a greeting or thanks ("hi", "thanks!", "bye") are answered instantly without calling the LLM. A greeting followed by a question ("hey, what causes diabetes?") is answered normally.
 - Chat history is kept in the server's memory (the browser cookie only holds a conversation ID). It is cleared when the server restarts. Clear cookies or open a private window to start a fresh conversation.
 
+## Safety features
+
+Every message goes through safety checks in [`src/safety.py`](src/safety.py) **before** the AI sees it. When a check triggers, the AI is skipped and a fixed, reviewed reply is shown instead, so it's instant and works even if Mistral is down or rate-limited.
+
+| Situation | Example | What happens |
+|-----------|---------|--------------|
+| 🚨 **Emergency happening now** | *"My dad is having chest pain"*, *"my son swallowed bleach"*, *"her face is drooping"* | Red card: call **112** (emergency) or **108** (ambulance), plus short first-aid steps for that situation |
+| 💙 **Suicidal thoughts / self-harm** | *"I want to end my life"*, *"my friend is suicidal"* | Blue card with **Tele-MANAS 14416** (free, 24×7) and **112** |
+| 💊 **Personal dose or prescription** | *"How much paracetamol should I take?"*, *"Which medicine should I take for a cold?"* | Polite refusal; suggests a doctor or pharmacist and offers general information instead |
+| ℹ️ **General question about an emergency topic** | *"What are the signs of a heart attack?"* | Answered normally, with an orange *"if this is happening now, call 112"* notice |
+| 🙅 **Nothing relevant in the books** | *"What is long COVID?"*, *"What's the capital of France?"* | *"I couldn't find reliable information…"* instead of a guess |
+
+On phones, the helpline numbers are tappable links that start a call.
+
+**How "happening now" is told apart from a general question:** a symptom alone isn't enough. The message must also describe someone experiencing it (*"I'm…"*, *"my mother has…"*, *"her throat is swelling"*) or contain an urgent phrase (*"right now"*, *"help me"*, *"what should I do"*). Mentions of the past, prevention or risk (*"I had a stroke last year"*) are not treated as emergencies. Ambiguous messages lean towards showing emergency information.
+
+**How "nothing relevant" is decided:** the reranker scores how well the best passage answers the question. Real medical questions scored between **+1.3 and +8.8**, off-topic ones between **−10.9 and −8.4**, and medical topics the books don't cover (long COVID, Zika, monkeypox) between **−9.7 and −2.4**. The cut-off is **−1.0** (`MIN_RELEVANCE_SCORE`).
+
+**Also built into the AI's instructions:** never give specific doses, never tell the user which medicine to take, start or stop, and never diagnose.
+
+**Rate limiting:** each visitor can send **10 messages per minute and 100 per day** (`CHAT_RATE_LIMIT`). Emergency and crisis messages are **never** rate-limited. Separately, calls to Mistral are spaced at least 1.1 seconds apart across all users (`MISTRAL_MIN_INTERVAL`), which keeps the free tier's ~1 request/second limit from being hit.
+
+> ⚠️ These are keyword rules: fast, free and predictable, but not perfect. They can miss unusual wording or flag a harmless message. They support, but do not replace, professional care. The emergency numbers default to India; change them in `.env` for other countries.
+
 ## Configuration reference
 
 ### Environment variables (`.env`)
@@ -299,6 +334,12 @@ Running without activating the venv (Windows):
 | `HOST`              | ❌       | `127.0.0.1`         | Address to listen on. Use `0.0.0.0` to allow other devices on your network (ignored while debug mode is on) |
 | `FLASK_DEBUG`       | ❌       | off                 | `1` enables auto-reload and the debugger. Never enable it on a network-visible server |
 | `OPEN_BROWSER`      | ❌       | `default`           | Browser to open on startup: `default`, `chrome`, `edge` or `none` |
+| `EMERGENCY_NUMBER`  | ❌       | `112`               | Emergency number shown in emergency and crisis replies |
+| `AMBULANCE_NUMBER`  | ❌       | `108`               | Ambulance number shown in emergency replies |
+| `MENTAL_HEALTH_HELPLINE` | ❌  | `14416`             | Mental-health helpline (Tele-MANAS) shown in crisis replies |
+| `MIN_RELEVANCE_SCORE` | ❌     | `-1.0`              | Below this reranker score the bot declines to answer. Lower = answers more, but guesses more |
+| `CHAT_RATE_LIMIT`   | ❌       | `10 per minute;100 per day` | Messages allowed per visitor (Flask-Limiter syntax) |
+| `MISTRAL_MIN_INTERVAL` | ❌    | `1.1`               | Minimum seconds between Mistral calls across all users |
 
 **Choosing `MISTRAL_MODEL`:** your Mistral plan decides which models you can use. `open-mistral-nemo` works on the free tier. With a paid plan you can switch to stronger models such as `mistral-small-latest`, `mistral-medium-latest` or `mistral-large-latest` for better answers.
 
@@ -343,7 +384,14 @@ Send a message and get the bot's reply.
   ]
 }
 ```
-`sources` lists the book and page of each passage the answer was based on, best match first. It is omitted for instant greeting replies.
+| Field | When present | Meaning |
+|-------|--------------|---------|
+| `response` | always | The reply text (may contain `**bold**` and line breaks) |
+| `sources` | normal answers | Book and page of each passage the answer was based on, best match first |
+| `notice` | general questions about emergency topics | Extra *"if this is happening now, call…"* note to show with the answer |
+| `kind` | safety replies | `emergency`, `crisis`, `dosage`, `low_confidence` or `rate_limited` |
+
+When the rate limit is exceeded, the status code is **429** and `kind` is `rate_limited`.
 
 Example with curl:
 ```bash
@@ -351,6 +399,19 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 ```
 
 ---
+
+## Running the tests
+
+The safety rules have 49 automated tests covering emergencies, crises, dosage requests, general questions that should only get a notice, and normal questions that must pass through untouched. They need no API keys and run in under a second:
+
+```bash
+pip install -r requirements-dev.txt
+```
+```bash
+python -m pytest -q
+```
+
+When you change a rule in `src/safety.py`, add the message that prompted the change to `tests/test_safety.py`.
 
 ## Troubleshooting
 
@@ -371,6 +432,9 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 | `Address already in use` / port 8080 busy | Another program is using the port. Set `PORT=5000` in `.env`, or stop the other program. |
 | Browser opens but shows "This site can't be reached" | The server stopped or is still starting. Check the terminal for errors, then refresh. Use `http://localhost:8080` (not `https://`). |
 | No browser window opens | `OPEN_BROWSER=none` may be set in `.env`. Open <http://localhost:8080> manually, or run `python app.py --browser chrome`. |
+| *"You're sending messages too quickly"* | You hit the rate limit (10 per minute by default). Wait a minute, or raise `CHAT_RATE_LIMIT` in `.env`. |
+| A normal question gets *"I couldn't find reliable information"* | The books may not cover it, or the wording is vague. Try naming the condition or medicine. To make the bot less strict, lower `MIN_RELEVANCE_SCORE` (e.g. `-3`). |
+| A harmless message got an emergency or dosage reply | The keyword rules erred on the side of caution. Rephrase it as a general question, e.g. *"What are the signs of…"*. |
 | Install fails on Python 3.13/3.14 | Some packages lack wheels for very new Python versions. Use Python 3.12. |
 
 ## Customisation ideas

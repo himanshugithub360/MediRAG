@@ -310,6 +310,48 @@
     }
     .msg-row.user .msg-meta { justify-content: flex-end; }
 
+    /* safety: emergency / crisis / refusal cards and notices */
+    .msg-row.kind-emergency .msg-bubble {
+      background: rgba(255, 59, 48, 0.14);
+      border: 1px solid rgba(255, 99, 88, 0.6);
+      box-shadow: 0 0 24px rgba(255, 59, 48, 0.25);
+    }
+    .msg-row.kind-emergency .msg-bubble::before { background: #ff4d42; }
+    .msg-row.kind-crisis .msg-bubble {
+      background: rgba(94, 160, 255, 0.14);
+      border: 1px solid rgba(120, 175, 255, 0.55);
+    }
+    .msg-row.kind-crisis .msg-bubble::before { background: #6ea8ff; }
+    .msg-row.kind-dosage .msg-bubble,
+    .msg-row.kind-low_confidence .msg-bubble,
+    .msg-row.kind-rate_limited .msg-bubble {
+      border: 1px solid rgba(255, 196, 0, 0.45);
+    }
+    .msg-row.kind-dosage .msg-bubble::before,
+    .msg-row.kind-low_confidence .msg-bubble::before,
+    .msg-row.kind-rate_limited .msg-bubble::before { background: #ffc400; }
+    .tel-link {
+      color: #fff;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.14);
+      padding: 0 6px;
+      border-radius: 6px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .tel-link:hover { background: rgba(255, 255, 255, 0.28); }
+    .msg-notice {
+      margin-top: 6px;
+      padding: 7px 10px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: #ffd9a8;
+      background: rgba(255, 159, 10, 0.1);
+      border: 1px solid rgba(255, 159, 10, 0.35);
+      border-radius: 10px;
+    }
+    .msg-notice .tel-link { color: #ffd9a8; background: rgba(255, 159, 10, 0.18); }
+
     /* sources under bot answers */
     .msg-sources {
       margin-top: 6px;
@@ -625,9 +667,15 @@
         </details>`;
     }
 
-    function appendMessage(role, text, sources) {
+    function linkPhoneNumbers(html) {
+      // Make helpline numbers tappable on phones (e.g. 112, 108, 14416)
+      // (skip HTML entities like &#039; and digits that are part of words)
+      return html.replace(/(^|[^#&\w])(\d{3,5})(?![\w;])/g, '$1<a class="tel-link" href="tel:$2">$2</a>');
+    }
+
+    function appendMessage(role, text, sources, kind, notice) {
       const row = document.createElement('div');
-      row.className = `msg-row ${role}`;
+      row.className = `msg-row ${role}${kind ? ' kind-' + kind : ''}`;
 
       const initials = role === 'user' ? 'You' : '';
       const avatarHtml = role === 'bot'
@@ -640,12 +688,16 @@
         : `<div class="msg-avatar user">${initials[0]}</div>`;
 
       const label = role === 'bot' ? 'Dr. Insight' : 'You';
-      const displayText = role === 'bot' ? formatBotText(text) : escapeHtml(text);
+      let displayText = role === 'bot' ? formatBotText(text) : escapeHtml(text);
+      if (kind === 'emergency' || kind === 'crisis') displayText = linkPhoneNumbers(displayText);
+      const noticeHtml = notice
+        ? `<div class="msg-notice">⚠️ ${linkPhoneNumbers(escapeHtml(notice))}</div>` : '';
 
       row.innerHTML = `
         ${avatarHtml}
         <div>
           <div class="msg-bubble">${displayText}</div>
+          ${noticeHtml}
           ${role === 'bot' ? sourcesHtml(sources) : ''}
           <div class="msg-meta">${label} · ${getTime()}</div>
         </div>
@@ -704,7 +756,8 @@
         });
         const data = await res.json();
         removeTyping();
-        appendMessage('bot', data.response || "I'm not sure how to respond to that.", data.sources);
+        appendMessage('bot', data.response || "I'm not sure how to respond to that.",
+                      data.sources, data.kind, data.notice);
       } catch (err) {
         removeTyping();
         appendMessage('bot', '⚠️ Connection error. Please check your network and try again.');

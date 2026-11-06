@@ -11,9 +11,13 @@ import logging
 import os
 import re
 
+from typing import Sequence
+
 from langchain.retrievers import ContextualCompressionRetriever, EnsembleRetriever
-from langchain.retrievers.document_compressors import CrossEncoderReranker
+from langchain.retrievers.document_compressors.cross_encoder import BaseCrossEncoder
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain_core.documents import BaseDocumentCompressor, Document
+from pydantic import ConfigDict
 from langchain_community.retrievers import BM25Retriever
 
 from src.config import (CANDIDATES_PER_RETRIEVER, CHUNKS_PATH, FINAL_K, RERANKER_MODEL,
@@ -37,8 +41,29 @@ def build_bm25_retriever(chunks, k=CANDIDATES_PER_RETRIEVER):
     return retriever
 
 
+class ScoredCrossEncoderReranker(BaseDocumentCompressor):
+    """Like LangChain's CrossEncoderReranker, but keeps each passage's score in
+    metadata["relevance_score"] so the app can refuse to answer when even the best
+    passage is a poor match for the question."""
+
+    model: BaseCrossEncoder
+    top_n: int = FINAL_K
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def compress_documents(self, documents: Sequence[Document], query: str, callbacks=None):
+        if not documents:
+            return []
+        scores = self.model.score([(query, doc.page_content) for doc in documents])
+        ranked = sorted(zip(documents, scores), key=lambda pair: pair[1], reverse=True)[: self.top_n]
+        # Copy documents so the shared in-memory BM25 corpus is never mutated
+        return [Document(page_content=doc.page_content, id=doc.id,
+                         metadata={**doc.metadata, "relevance_score": float(score)})
+                for doc, score in ranked]
+
+
 def build_reranker(top_n=FINAL_K):
-    return CrossEncoderReranker(model=HuggingFaceCrossEncoder(model_name=RERANKER_MODEL), top_n=top_n)
+    return ScoredCrossEncoderReranker(model=HuggingFaceCrossEncoder(model_name=RERANKER_MODEL), top_n=top_n)
 
 
 def build_retriever(vector_store, chunks_path=CHUNKS_PATH, use_bm25=True, use_reranker=True,
