@@ -8,11 +8,14 @@ import time
 load_dotenv()
 
 PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY')
+if not PINECONE_API_KEY:
+    raise SystemExit('PINECONE_API_KEY is not set. Add it to your .env file.')
 os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
 
 # Load and process documents
 print("Loading PDF documents...")
-extracted_data = load_pdf_file(data=r'E:\Projects\Medical chatbot\medical-chatbot\Data')
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data')
+extracted_data = load_pdf_file(data=DATA_DIR)
 print(f"Loaded {len(extracted_data)} documents")
 
 # Split text with medical-specific chunking

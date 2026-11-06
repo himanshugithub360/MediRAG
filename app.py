@@ -8,12 +8,17 @@ from langchain_mistralai import ChatMistralAI
 from dotenv import load_dotenv
 import os
 
-app = Flask(__name__)
+# Serve /static files at the site root too, so /favicon-32x32.png etc. resolve
+app = Flask(__name__, static_folder='static', static_url_path='')
 load_dotenv()
 
 PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY')
 MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'fallback-secret-key')
+
+missing = [k for k, v in {'PINECONE_API_KEY': PINECONE_API_KEY, 'MISTRAL_API_KEY': MISTRAL_API_KEY}.items() if not v]
+if missing:
+    raise SystemExit(f"Missing environment variables: {', '.join(missing)}. Add them to your .env file.")
 
 os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
 os.environ["MISTRAL_API_KEY"] = MISTRAL_API_KEY
@@ -44,7 +49,8 @@ retriever = docsearch.as_retriever(
 )
 
 llm = ChatMistralAI(
-    model="mistral-large-latest",
+    # Override via MISTRAL_MODEL in .env (e.g. mistral-large-latest on a paid tier)
+    model=os.environ.get("MISTRAL_MODEL", "open-mistral-nemo"),
     temperature=0.2,
     api_key=MISTRAL_API_KEY
 )
@@ -108,7 +114,7 @@ def chat():
             bot_response = "I don't have enough information to answer that accurately. Could you rephrase, or consult a healthcare professional for this concern?"
 
     except Exception as e:
-        print("Error generating response:", e)
+        app.logger.exception("Error generating response: %s", e)
         bot_response = "I'm having trouble processing that request. Please try again."
 
     session["history"].append(f"User: {user_message}")
@@ -119,4 +125,4 @@ def chat():
 
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
