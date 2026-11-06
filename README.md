@@ -27,7 +27,7 @@ Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augment
 
 - 💬 Chat web interface (Flask + HTML/CSS/JS) with suggested starter questions
 - 📚 Answers grounded in a medical encyclopedia via vector search (Pinecone)
-- 🧠 Short-term conversation memory (last few messages per browser session)
+- 🧠 Conversation memory: follow-ups like *"what are its treatments?"* are understood in context
 - ⚡ Instant replies for greetings like "hi", "thanks", "bye" (no API call needed)
 - 🩺 An empathetic "Dr. Insight" persona that recommends seeing a real doctor
 - 🔧 LLM model selectable through an environment variable
@@ -177,7 +177,7 @@ FLASK_SECRET_KEY=any-long-random-string
 # PORT=8080
 ```
 
-- `FLASK_SECRET_KEY` signs the browser session cookie that stores chat history. Any random string works; you can generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+- `FLASK_SECRET_KEY` signs the browser session cookie that identifies your conversation. If it's not set, a random key is generated on each start, so conversations reset when the server restarts. Any random string works; you can generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
 - `.env` is listed in `.gitignore`. **Never commit your API keys.**
 
 ### 6. Build the Pinecone index (first time only)
@@ -206,10 +206,23 @@ It takes several minutes, depending on your CPU and connection. At the end it pr
 python app.py
 ```
 
-Then open **<http://localhost:8080>** in your browser.
+When the server is ready, the chat opens automatically in your default browser at **<http://localhost:8080>**.
+
+### Choosing the browser
+
+| Command | Opens in |
+|---------|----------|
+| `python app.py` | Your system's default browser |
+| `python app.py --browser chrome` | Google Chrome |
+| `python app.py --browser edge` | Microsoft Edge |
+| `python app.py --browser none` | Nothing. Open <http://localhost:8080> yourself in any browser (Chrome, Edge, Firefox, Brave, …) |
+
+To make a choice permanent, add `OPEN_BROWSER=chrome` (or `edge`, `default`, `none`) to `.env`. A `--browser` flag on the command line overrides it. If the chosen browser isn't installed, the app opens your default browser instead. Chrome and Edge are found automatically on Windows, macOS and Linux.
+
+### Notes
 
 - The first start is slower because it downloads the embedding model (~90 MB) to `~/.cache/huggingface`. Later starts are quick.
-- The server runs in Flask **debug mode**: it reloads automatically when you edit Python files.
+- By default the server listens only on `127.0.0.1` (your own computer). To have it reload automatically when you edit Python files, set `FLASK_DEBUG=1` in `.env` (debug mode is always kept on `127.0.0.1` for safety).
 - To stop the server, press `Ctrl + C`.
 - To use another port, set `PORT=5000` in `.env`.
 
@@ -221,9 +234,9 @@ Running without activating the venv (Windows):
 ## Using the chatbot
 
 - Type a medical question (for example, *"What are the symptoms of diabetes?"*) and press Enter, or click a suggested question.
-- Follow-up questions work: the last 8 messages of the conversation are sent as context.
-- Greetings and thanks ("hi", "thanks", "bye") are answered instantly without calling the LLM.
-- Chat history is stored in your browser's session cookie. Clear cookies or open a private window to start fresh.
+- Follow-up questions work: the bot first rewrites a follow-up into a standalone question (e.g. *"what are its treatments?"* → *"what are the treatments for asthma?"*) before searching, and the last 8 messages are sent to the LLM as context.
+- Messages that are *only* a greeting or thanks ("hi", "thanks!", "bye") are answered instantly without calling the LLM. A greeting followed by a question ("hey, what causes diabetes?") is answered normally.
+- Chat history is kept in the server's memory (the browser cookie only holds a conversation ID). It is cleared when the server restarts. Clear cookies or open a private window to start a fresh conversation.
 
 ## Configuration reference
 
@@ -233,9 +246,12 @@ Running without activating the venv (Windows):
 |---------------------|----------|---------------------|---------|
 | `PINECONE_API_KEY`  | ✅       | —                   | Access to the Pinecone vector database |
 | `MISTRAL_API_KEY`   | ✅       | —                   | Access to the Mistral LLM |
-| `FLASK_SECRET_KEY`  | Recommended | `fallback-secret-key` | Signs session cookies |
+| `FLASK_SECRET_KEY`  | Recommended | random per start | Signs the session cookie |
 | `MISTRAL_MODEL`     | ❌       | `open-mistral-nemo` | Which Mistral model answers questions |
 | `PORT`              | ❌       | `8080`              | Port the web server listens on |
+| `HOST`              | ❌       | `127.0.0.1`         | Address to listen on. Use `0.0.0.0` to allow other devices on your network (ignored while debug mode is on) |
+| `FLASK_DEBUG`       | ❌       | off                 | `1` enables auto-reload and the debugger. Never enable it on a network-visible server |
+| `OPEN_BROWSER`      | ❌       | `default`           | Browser to open on startup: `default`, `chrome`, `edge` or `none` |
 
 **Choosing `MISTRAL_MODEL`:** your Mistral plan decides which models you can use. `open-mistral-nemo` works on the free tier. With a paid plan you can switch to stronger models such as `mistral-small-latest`, `mistral-medium-latest` or `mistral-large-latest` for better answers.
 
@@ -248,7 +264,8 @@ Running without activating the venv (Windows):
 | Chunks retrieved per question (`k`) | `app.py` | `5` |
 | LLM temperature | `app.py` | `0.2` |
 | Chunk size / overlap | `src/helper.py` | `300` / `50` characters |
-| Chat history length sent to the LLM | `app.py` | last 8 messages |
+| Chat history length sent to the LLM | `app.py` (`MAX_HISTORY_MESSAGES`) | last 8 messages |
+| Quick replies for greetings | `app.py` (`QUICK_RESPONSES`, `GREETING_ALIASES`) | hi, hello, thanks, bye, … |
 | System prompt / persona | `app.py` (`system_prompt`) | "Dr. Insight" |
 
 > If you change the embedding model, the vector dimension changes too. You must then recreate the Pinecone index with the new dimension and rerun `store_index.py`.
@@ -292,6 +309,8 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 | PyTorch download is huge / slow | You installed the default GPU build. Uninstall it and install the CPU build with the command in step 4. |
 | Hugging Face "symlinks" warning on Windows | Harmless. To hide it, set `HF_HUB_DISABLE_SYMLINKS_WARNING=1`, or enable Windows Developer Mode. |
 | `Address already in use` / port 8080 busy | Another program is using the port. Set `PORT=5000` in `.env`, or stop the other program. |
+| Browser opens but shows "This site can't be reached" | The server stopped or is still starting. Check the terminal for errors, then refresh. Use `http://localhost:8080` (not `https://`). |
+| No browser window opens | `OPEN_BROWSER=none` may be set in `.env`. Open <http://localhost:8080> manually, or run `python app.py --browser chrome`. |
 | Install fails on Python 3.13/3.14 | Some packages lack wheels for very new Python versions. Use Python 3.12. |
 
 ## Customisation ideas
@@ -300,7 +319,7 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 - **Change the persona:** edit `system_prompt` in `app.py`.
 - **Use a different LLM:** swap `ChatMistralAI` for another LangChain chat model (OpenAI, Anthropic, Groq, a local Ollama model, ...).
 - **Show sources:** `rag_chain.invoke(...)` also returns `context` (the retrieved chunks). Return their page numbers to the UI to cite sources.
-- **Deploy:** run behind a production WSGI server (e.g. `waitress` on Windows, `gunicorn` on Linux) with `debug=False`.
+- **Deploy:** run behind a production WSGI server (e.g. `waitress` on Windows, `gunicorn` on Linux) (keep `FLASK_DEBUG` off).
 
 ---
 

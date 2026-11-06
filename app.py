@@ -1,12 +1,19 @@
 from flask import Flask, jsonify, request, render_template, session
-from langchain.chains import create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_pinecone import PineconeVectorStore
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_mistralai import ChatMistralAI
+from collections import OrderedDict
 from dotenv import load_dotenv
 import os
+import re
+import secrets
+import threading
+import time
+import uuid
 
 # Serve /static files at the site root too, so /favicon-32x32.png etc. resolve
 app = Flask(__name__, static_folder='static', static_url_path='')
@@ -14,7 +21,8 @@ load_dotenv()
 
 PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY')
 MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
-app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'fallback-secret-key')
+# Without a fixed key, sessions reset whenever the server restarts — fine for local use
+app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
 missing = [k for k, v in {'PINECONE_API_KEY': PINECONE_API_KEY, 'MISTRAL_API_KEY': MISTRAL_API_KEY}.items() if not v]
 if missing:
@@ -31,10 +39,25 @@ system_prompt = (
     "Your role is to provide accurate, evidence-based medical information based strictly on the provided context. "
     "Be concise, clear, and compassionate. If the context does not contain enough information to answer, say so honestly. "
     "Never fabricate medical facts. Always recommend consulting a real doctor for diagnosis or treatment. "
-    "For emotional statements, acknowledge the person's feelings first before providing information.\n\n"
-    "Medical Context:\n{context}\n\n"
-    "Conversation History:\n{history}\n\n"
+    "For emotional statements, acknowledge the person's feelings first before providing information.\n"
+    "The reference passages below were retrieved from a medical encyclopedia by the system; the user did not "
+    "write or provide them, so never refer to them as something the user said or shared. "
+    "For questions about the conversation itself, rely only on the chat messages.\n\n"
+    "Reference passages:\n{context}"
 )
+
+# Turns a follow-up like "what are its treatments?" into a standalone search query
+# ("what are the treatments for diabetes?") so retrieval finds the right passages.
+contextualize_prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "Given the conversation so far and the user's latest message, rewrite the latest message "
+     "as a standalone question that can be understood without the conversation. "
+     "Resolve pronouns and references (it, this, that condition, etc.). "
+     "Do NOT answer the question. If it is already standalone, return it unchanged. "
+     "Return only the question."),
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+])
 
 # Use the correct namespace matching store_index.py
 docsearch = PineconeVectorStore.from_existing_index(
@@ -57,12 +80,64 @@ llm = ChatMistralAI(
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", system_prompt),
+    MessagesPlaceholder("chat_history"),
     ("human", "{input}"),
 ])
 
 question_answer_chain = create_stuff_documents_chain(llm, prompt)
-rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+contextualize_chain = contextualize_prompt | llm | StrOutputParser()
 
+
+# ── Conversation memory (server-side) ────────────────────────────────────────
+# History used to live in Flask's cookie session, which is capped at ~4 KB; a few
+# long answers overflowed it and the conversation was silently lost. Now the cookie
+# only carries a conversation id and the messages live in server memory.
+MAX_HISTORY_MESSAGES = 8      # messages sent to the LLM as context
+MAX_STORED_MESSAGES = 20      # messages kept per conversation
+MAX_CONVERSATIONS = 1000      # oldest conversations are evicted beyond this
+
+_conversations: "OrderedDict[str, list[tuple[str, str]]]" = OrderedDict()
+_conversations_lock = threading.Lock()
+
+
+def get_history(conv_id):
+    with _conversations_lock:
+        if conv_id in _conversations:
+            _conversations.move_to_end(conv_id)
+            return list(_conversations[conv_id])
+        return []
+
+
+def append_history(conv_id, user_message, bot_response):
+    with _conversations_lock:
+        history = _conversations.setdefault(conv_id, [])
+        history.append(("human", user_message))
+        history.append(("ai", bot_response))
+        del history[:-MAX_STORED_MESSAGES]
+        _conversations.move_to_end(conv_id)
+        while len(_conversations) > MAX_CONVERSATIONS:
+            _conversations.popitem(last=False)
+
+
+def to_messages(history):
+    return [HumanMessage(text) if role == "human" else AIMessage(text) for role, text in history]
+
+
+def invoke_with_retry(chain, inputs, attempts=3):
+    """The Mistral free tier allows ~1 request/second; back off briefly on 429s."""
+    for attempt in range(attempts):
+        try:
+            return chain.invoke(inputs)
+        except Exception as e:
+            if "429" in str(e) and attempt < attempts - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+
+
+# ── Quick replies for pure greetings / small talk ────────────────────────────
+# Only used when the *whole* message is small talk. Previously "hey, what causes
+# diabetes?" matched "hey" and the medical question was never answered.
 QUICK_RESPONSES = {
     "hi": "Hello! I'm Dr. Insight, your AI medical assistant. How can I help you today?",
     "hello": "Hi there! What health questions can I help you with?",
@@ -74,6 +149,33 @@ QUICK_RESPONSES = {
     "goodbye": "Goodbye! Stay healthy!",
 }
 
+GREETING_ALIASES = {
+    "hii": "hi", "hiii": "hi", "hi there": "hi", "hi doctor": "hi", "hi dr insight": "hi",
+    "hello there": "hello", "hello doctor": "hello", "hello dr insight": "hello",
+    "good morning": "hello", "good afternoon": "hello", "good evening": "hello",
+    "hey there": "hey", "hey doctor": "hey",
+    "how are you doing": "how are you", "how r u": "how are you", "hi how are you": "how are you",
+    "hello how are you": "how are you", "hey how are you": "how are you",
+    "thank you so much": "thank you", "thank you very much": "thank you",
+    "thanks a lot": "thanks", "thanks so much": "thanks", "thx": "thanks", "ok thanks": "thanks",
+    "okay thanks": "thanks", "ok thank you": "thank you",
+    "bye bye": "bye", "see you": "bye", "see you later": "bye", "good bye": "goodbye",
+}
+
+
+def quick_reply(message):
+    """Return a canned reply if the entire message is a greeting/thanks/farewell."""
+    normalized = re.sub(r"[^a-z\s]", " ", message.lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    key = GREETING_ALIASES.get(normalized, normalized)
+    return QUICK_RESPONSES.get(key)
+
+
+def get_conversation_id():
+    if "conv_id" not in session:
+        session["conv_id"] = uuid.uuid4().hex
+    return session["conv_id"]
+
 
 @app.route("/")
 def index():
@@ -82,47 +184,140 @@ def index():
 
 @app.route("/chat", methods=["POST"])
 def chat():
-    data = request.get_json()
-    user_message = data.get("message", "").strip()
+    data = request.get_json(silent=True) or {}
+    user_message = str(data.get("message", "")).strip()
 
     if not user_message:
         return jsonify({"response": "Please enter a message."})
 
-    lower_msg = user_message.lower()
+    conv_id = get_conversation_id()
 
-    if "history" not in session:
-        session["history"] = []
+    reply = quick_reply(user_message)
+    if reply:
+        append_history(conv_id, user_message, reply)
+        return jsonify({"response": reply})
 
-    # Quick responses for greetings/farewells
-    for keyword, reply in QUICK_RESPONSES.items():
-        if lower_msg == keyword or lower_msg.startswith(keyword + " ") or lower_msg.endswith(" " + keyword):
-            session["history"].append(f"User: {user_message}")
-            session["history"].append(f"Assistant: {reply}")
-            return jsonify({"response": reply})
-
-    conversation_history = "\n".join(session["history"][-8:])
+    chat_history = to_messages(get_history(conv_id)[-MAX_HISTORY_MESSAGES:])
 
     try:
-        response = rag_chain.invoke({
-            "input": user_message,
-            "history": conversation_history,
-        })
+        # Rewrite follow-ups into standalone questions before searching. If the
+        # rewrite fails (e.g. rate limit), fall back to searching the raw message.
+        search_query = user_message
+        if chat_history:
+            try:
+                rewritten = invoke_with_retry(contextualize_chain, {
+                    "input": user_message,
+                    "chat_history": chat_history,
+                }).strip()
+                if rewritten:
+                    search_query = rewritten
+            except Exception as e:
+                app.logger.warning("Question rewrite failed, using original message: %s", e)
 
-        bot_response = response.get("answer", "").strip()
+        docs = retriever.invoke(search_query)
+
+        bot_response = invoke_with_retry(question_answer_chain, {
+            "input": user_message,
+            "chat_history": chat_history,
+            "context": docs,
+        }).strip()
 
         if not bot_response:
             bot_response = "I don't have enough information to answer that accurately. Could you rephrase, or consult a healthcare professional for this concern?"
 
     except Exception as e:
         app.logger.exception("Error generating response: %s", e)
-        bot_response = "I'm having trouble processing that request. Please try again."
+        # Don't store failed turns, so they don't pollute the conversation context
+        return jsonify({"response": "I'm having trouble processing that request. Please try again."})
 
-    session["history"].append(f"User: {user_message}")
-    session["history"].append(f"Assistant: {bot_response}")
-    session.modified = True
-
+    append_history(conv_id, user_message, bot_response)
     return jsonify({"response": bot_response})
 
 
+# ── Auto-open the chat in a browser on startup ───────────────────────────────
+BROWSER_CHOICES = ("default", "chrome", "edge", "none")
+
+
+def _find_browser(name):
+    """Return a command (list) that launches Chrome or Edge, or None if not installed."""
+    import shutil
+    import sys
+
+    if sys.platform == "win32":
+        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
+        pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        local = os.environ.get("LOCALAPPDATA", "")
+        rel = {"chrome": r"Google\Chrome\Application\chrome.exe",
+               "edge": r"Microsoft\Edge\Application\msedge.exe"}[name]
+        for base in (pf, pf86, local):
+            path = os.path.join(base, rel)
+            if base and os.path.isfile(path):
+                return [path]
+    elif sys.platform == "darwin":
+        app_name = {"chrome": "Google Chrome", "edge": "Microsoft Edge"}[name]
+        if os.path.isdir(f"/Applications/{app_name}.app"):
+            return ["open", "-a", app_name]
+    else:
+        candidates = {"chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+                      "edge": ["microsoft-edge", "microsoft-edge-stable"]}[name]
+        for exe in candidates:
+            if shutil.which(exe):
+                return [exe]
+    return None
+
+
+def open_browser(url, choice):
+    import subprocess
+    import webbrowser
+
+    if choice in ("chrome", "edge"):
+        cmd = _find_browser(choice)
+        if cmd:
+            subprocess.Popen(cmd + [url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        print(f"{choice.title()} was not found; opening your default browser instead.")
+    webbrowser.open(url)
+
+
+def open_browser_when_ready(url, choice, timeout=120):
+    """Wait until the server answers, then open the browser (runs in a background thread)."""
+    import urllib.request
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(url, timeout=2)
+            break
+        except Exception:
+            time.sleep(0.5)
+    open_browser(url, choice)
+
+
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)), debug=True)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run the Dr. Insight medical chatbot.")
+    parser.add_argument("--browser", choices=BROWSER_CHOICES,
+                        default=os.environ.get("OPEN_BROWSER", "default").lower(),
+                        help="Browser to open on startup (default: your system's default browser; "
+                             "'none' to not open one). Can also be set with OPEN_BROWSER in .env.")
+    args = parser.parse_args()
+    if args.browser not in BROWSER_CHOICES:
+        parser.error(f"OPEN_BROWSER must be one of: {', '.join(BROWSER_CHOICES)}")
+
+    # Debug mode is opt-in: Werkzeug's debugger lets anyone who can reach it run code
+    # on this machine, so it must never be combined with a network-visible host.
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
+    host = os.environ.get("HOST", "127.0.0.1")
+    if debug and host not in ("127.0.0.1", "localhost"):
+        print(f"FLASK_DEBUG is on, so binding to 127.0.0.1 instead of {host} for safety.")
+        host = "127.0.0.1"
+    port = int(os.environ.get("PORT", 8080))
+
+    # With debug's auto-reloader the script runs twice; only open from the parent process.
+    if args.browser != "none" and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
+        url = f"http://localhost:{port}"
+        print(f"Opening {url} in {'your default browser' if args.browser == 'default' else args.browser.title()}...")
+        threading.Thread(target=open_browser_when_ready, args=(url, args.browser), daemon=True).start()
+
+    app.run(host=host, port=port, debug=debug)
