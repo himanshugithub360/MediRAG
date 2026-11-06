@@ -1,19 +1,20 @@
-from flask import Flask, jsonify, request, render_template, session
+from flask import Flask, Response, abort, jsonify, render_template, request, session, stream_with_context
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from langchain_pinecone import PineconeVectorStore
 from langchain_mistralai import ChatMistralAI
-from collections import OrderedDict
 from dotenv import load_dotenv
+from datetime import timedelta
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from src.config import (CHAT_RATE_LIMIT, INDEX_NAME, MIN_RELEVANCE_SCORE, MISTRAL_MIN_INTERVAL,
-                        NAMESPACE)
+                        NAMESPACE, PROJECT_ROOT)
 from src.helper import download_hugging_face_embeddings
 from src.retrieval import build_retriever
-from src import safety
+from src import safety, storage
+import json
 import os
 import re
 import secrets
@@ -27,10 +28,34 @@ load_dotenv()
 
 PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY')
 MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
-# Without a fixed key, sessions reset whenever the server restarts — fine for local use
-app.secret_key = os.environ.get('FLASK_SECRET_KEY') or secrets.token_hex(32)
 
-# Per-visitor rate limit on /chat (in memory; resets when the server restarts)
+missing = [k for k, v in {'PINECONE_API_KEY': PINECONE_API_KEY, 'MISTRAL_API_KEY': MISTRAL_API_KEY}.items() if not v]
+if missing:
+    raise SystemExit(f"Missing environment variables: {', '.join(missing)}. Add them to your .env file.")
+
+os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
+os.environ["MISTRAL_API_KEY"] = MISTRAL_API_KEY
+
+
+def _load_secret_key():
+    """Use FLASK_SECRET_KEY, or a random key saved in instance/ so that users keep
+    access to their saved chats across server restarts."""
+    if os.environ.get("FLASK_SECRET_KEY"):
+        return os.environ["FLASK_SECRET_KEY"]
+    path = os.path.join(PROJECT_ROOT, "instance", "secret_key")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            f.write(secrets.token_hex(32))
+    with open(path) as f:
+        return f.read().strip()
+
+
+app.secret_key = _load_secret_key()
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
+storage.init_db()
+
+# Per-visitor rate limit on chat endpoints (in memory; resets when the server restarts)
 limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
 
 
@@ -42,13 +67,7 @@ def rate_limited(e):
     }), 429
 
 
-missing = [k for k, v in {'PINECONE_API_KEY': PINECONE_API_KEY, 'MISTRAL_API_KEY': MISTRAL_API_KEY}.items() if not v]
-if missing:
-    raise SystemExit(f"Missing environment variables: {', '.join(missing)}. Add them to your .env file.")
-
-os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-os.environ["MISTRAL_API_KEY"] = MISTRAL_API_KEY
-
+# ── RAG pipeline ─────────────────────────────────────────────────────────────
 embeddings = download_hugging_face_embeddings()
 
 system_prompt = (
@@ -59,7 +78,9 @@ system_prompt = (
     "Never give specific doses or dosing schedules, never tell the user which medicine they personally "
     "should take, start, stop or change, and never diagnose the user; you may explain what medicines are "
     "generally used for, how they work, and their side effects and interactions. "
-    "For emotional statements, acknowledge the person's feelings first before providing information.\n"
+    "Only when the user expresses worry, fear or other feelings, briefly acknowledge them first; "
+    "for factual questions, answer directly without assuming how the user feels. "
+    "Format answers in Markdown: use short paragraphs, bullet lists and **bold** for key terms.\n"
     "The reference passages below were retrieved from medical reference books by the system; the user did not "
     "write or provide them, so never refer to them as something the user said or shared. "
     "Each passage starts with its book and page in square brackets. Don't add citations to your answer; "
@@ -109,40 +130,10 @@ document_prompt = PromptTemplate.from_template("[{source}, page {page}]\n{page_c
 question_answer_chain = create_stuff_documents_chain(llm, prompt, document_prompt=document_prompt)
 contextualize_chain = contextualize_prompt | llm | StrOutputParser()
 
-
-# ── Conversation memory (server-side) ────────────────────────────────────────
-# History used to live in Flask's cookie session, which is capped at ~4 KB; a few
-# long answers overflowed it and the conversation was silently lost. Now the cookie
-# only carries a conversation id and the messages live in server memory.
-MAX_HISTORY_MESSAGES = 8      # messages sent to the LLM as context
-MAX_STORED_MESSAGES = 20      # messages kept per conversation
-MAX_CONVERSATIONS = 1000      # oldest conversations are evicted beyond this
-
-_conversations: "OrderedDict[str, list[tuple[str, str]]]" = OrderedDict()
-_conversations_lock = threading.Lock()
-
-
-def get_history(conv_id):
-    with _conversations_lock:
-        if conv_id in _conversations:
-            _conversations.move_to_end(conv_id)
-            return list(_conversations[conv_id])
-        return []
-
-
-def append_history(conv_id, user_message, bot_response):
-    with _conversations_lock:
-        history = _conversations.setdefault(conv_id, [])
-        history.append(("human", user_message))
-        history.append(("ai", bot_response))
-        del history[:-MAX_STORED_MESSAGES]
-        _conversations.move_to_end(conv_id)
-        while len(_conversations) > MAX_CONVERSATIONS:
-            _conversations.popitem(last=False)
-
-
-def to_messages(history):
-    return [HumanMessage(text) if role == "human" else AIMessage(text) for role, text in history]
+MAX_HISTORY_MESSAGES = 8      # recent messages sent to the LLM as context
+FALLBACK_ANSWER = ("I don't have enough information to answer that accurately. Could you rephrase, "
+                   "or consult a healthcare professional for this concern?")
+ERROR_ANSWER = "I'm having trouble processing that request. Please try again."
 
 
 _mistral_lock = threading.Lock()
@@ -173,9 +164,28 @@ def invoke_with_retry(chain, inputs, attempts=3):
             raise
 
 
+def stream_with_retry(chain, inputs, attempts=3):
+    """Like invoke_with_retry, but yields text chunks as they arrive. A 429 can only be
+    retried before the first chunk; after that, partial text has already been shown."""
+    for attempt in range(attempts):
+        started = False
+        try:
+            wait_for_mistral_slot()
+            for chunk in chain.stream(inputs):
+                if chunk:
+                    started = True
+                    yield chunk
+            return
+        except Exception as e:
+            if "429" in str(e) and not started and attempt < attempts - 1:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+
+
 # ── Quick replies for pure greetings / small talk ────────────────────────────
-# Only used when the *whole* message is small talk. Previously "hey, what causes
-# diabetes?" matched "hey" and the medical question was never answered.
+# Only used when the *whole* message is small talk, so "hey, what causes diabetes?"
+# still gets a real answer.
 QUICK_RESPONSES = {
     "hi": "Hello! I'm Dr. Insight, your AI medical assistant. How can I help you today?",
     "hello": "Hi there! What health questions can I help you with?",
@@ -209,101 +219,6 @@ def quick_reply(message):
     return QUICK_RESPONSES.get(key)
 
 
-def get_conversation_id():
-    if "conv_id" not in session:
-        session["conv_id"] = uuid.uuid4().hex
-    return session["conv_id"]
-
-
-@app.route("/")
-def index():
-    return render_template('chat.html')
-
-
-def _request_message():
-    data = request.get_json(silent=True) or {}
-    return str(data.get("message", "")).strip()
-
-
-def _is_urgent_request():
-    """Emergency and crisis messages are never rate-limited."""
-    return safety.check_message(_request_message()).kind in (safety.EMERGENCY, safety.CRISIS)
-
-
-@app.route("/chat", methods=["POST"])
-@limiter.limit(CHAT_RATE_LIMIT, exempt_when=_is_urgent_request)
-def chat():
-    user_message = _request_message()
-
-    if not user_message:
-        return jsonify({"response": "Please enter a message."})
-
-    conv_id = get_conversation_id()
-
-    # Safety checks run before anything else, and skip the AI entirely when they trigger
-    check = safety.check_message(user_message)
-    canned = {
-        safety.CRISIS: safety.crisis_response,
-        safety.EMERGENCY: lambda: safety.emergency_response(check.category),
-        safety.DOSAGE: safety.dosage_response,
-    }.get(check.kind)
-    if canned:
-        reply = canned()
-        app.logger.info("Safety rule '%s' (%s) triggered", check.kind, check.category or "-")
-        append_history(conv_id, user_message, reply)
-        return jsonify({"response": reply, "kind": check.kind})
-
-    reply = quick_reply(user_message)
-    if reply:
-        append_history(conv_id, user_message, reply)
-        return jsonify({"response": reply})
-
-    chat_history = to_messages(get_history(conv_id)[-MAX_HISTORY_MESSAGES:])
-
-    try:
-        # Rewrite follow-ups into standalone questions before searching. If the
-        # rewrite fails (e.g. rate limit), fall back to searching the raw message.
-        search_query = user_message
-        if chat_history:
-            try:
-                rewritten = invoke_with_retry(contextualize_chain, {
-                    "input": user_message,
-                    "chat_history": chat_history,
-                }).strip()
-                if rewritten:
-                    search_query = rewritten
-            except Exception as e:
-                app.logger.warning("Question rewrite failed, using original message: %s", e)
-
-        docs = retriever.invoke(search_query)
-
-        # Don't let the model guess when the reference books have nothing relevant
-        best_score = docs[0].metadata.get("relevance_score") if docs else None
-        if not docs or (best_score is not None and best_score < MIN_RELEVANCE_SCORE):
-            app.logger.info("Low relevance (best score %s) for %r; declining to answer",
-                            best_score, search_query)
-            reply = safety.low_confidence_response()
-            append_history(conv_id, user_message, reply)
-            return jsonify({"response": reply, "kind": "low_confidence", "notice": check.notice})
-
-        bot_response = invoke_with_retry(question_answer_chain, {
-            "input": user_message,
-            "chat_history": chat_history,
-            "context": docs,
-        }).strip()
-
-        if not bot_response:
-            bot_response = "I don't have enough information to answer that accurately. Could you rephrase, or consult a healthcare professional for this concern?"
-
-    except Exception as e:
-        app.logger.exception("Error generating response: %s", e)
-        # Don't store failed turns, so they don't pollute the conversation context
-        return jsonify({"response": "I'm having trouble processing that request. Please try again."})
-
-    append_history(conv_id, user_message, bot_response)
-    return jsonify({"response": bot_response, "sources": format_sources(docs), "notice": check.notice})
-
-
 def format_sources(docs):
     """Unique (book, page) pairs for the passages the answer was based on, best match first."""
     sources, seen = [], set()
@@ -317,67 +232,239 @@ def format_sources(docs):
     return sources
 
 
-# ── Auto-open the chat in a browser on startup ───────────────────────────────
-BROWSER_CHOICES = ("default", "chrome", "edge", "none")
+def to_langchain_history(messages):
+    """Saved messages -> LangChain messages. Failed turns are left out of the context."""
+    history = []
+    for m in messages:
+        if m.get("kind") == "error":
+            continue
+        history.append(HumanMessage(m["content"]) if m["role"] == "user" else AIMessage(m["content"]))
+    return history
 
 
-def _find_browser(name):
-    """Return a command (list) that launches Chrome or Edge, or None if not installed."""
-    import shutil
-    import sys
+# ── Answering a message (shared by the streaming and JSON endpoints) ─────────
+def answer_events(conversation_id, user_message):
+    """Yield (event, data) pairs for one user message and save both sides to the database.
 
-    if sys.platform == "win32":
-        pf = os.environ.get("ProgramFiles", r"C:\Program Files")
-        pf86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-        local = os.environ.get("LOCALAPPDATA", "")
-        rel = {"chrome": r"Google\Chrome\Application\chrome.exe",
-               "edge": r"Microsoft\Edge\Application\msedge.exe"}[name]
-        for base in (pf, pf86, local):
-            path = os.path.join(base, rel)
-            if base and os.path.isfile(path):
-                return [path]
-    elif sys.platform == "darwin":
-        app_name = {"chrome": "Google Chrome", "edge": "Microsoft Edge"}[name]
-        if os.path.isdir(f"/Applications/{app_name}.app"):
-            return ["open", "-a", app_name]
-    else:
-        candidates = {"chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
-                      "edge": ["microsoft-edge", "microsoft-edge-stable"]}[name]
-        for exe in candidates:
-            if shutil.which(exe):
-                return [exe]
-    return None
+    Events: "token" {"text"} for each piece of the answer, then "done" with the saved
+    assistant message, or "error".
+    """
+    history = to_langchain_history(storage.get_messages(conversation_id, limit=MAX_HISTORY_MESSAGES))
+    storage.add_message(conversation_id, "user", user_message)
 
+    def finish(text, kind=None, sources=None, notice=None):
+        message_id = storage.add_message(conversation_id, "assistant", text, sources=sources,
+                                         kind=kind, notice=notice)
+        return ("done", {"message_id": message_id, "content": text, "kind": kind,
+                         "sources": sources or [], "notice": notice})
 
-def open_browser(url, choice):
-    import subprocess
-    import webbrowser
+    # 1. Safety checks run before anything else, and skip the AI entirely when they trigger
+    check = safety.check_message(user_message)
+    canned = {
+        safety.CRISIS: safety.crisis_response,
+        safety.EMERGENCY: lambda: safety.emergency_response(check.category),
+        safety.DOSAGE: safety.dosage_response,
+    }.get(check.kind)
+    if canned:
+        app.logger.info("Safety rule '%s' (%s) triggered", check.kind, check.category or "-")
+        text = canned()
+        yield "token", {"text": text}
+        yield finish(text, kind=check.kind)
+        return
 
-    if choice in ("chrome", "edge"):
-        cmd = _find_browser(choice)
-        if cmd:
-            subprocess.Popen(cmd + [url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 2. Greetings and thanks
+    reply = quick_reply(user_message)
+    if reply:
+        yield "token", {"text": reply}
+        yield finish(reply)
+        return
+
+    parts, docs = [], []
+    try:
+        # 3. Rewrite follow-ups into standalone questions before searching. If the
+        #    rewrite fails (e.g. rate limit), fall back to searching the raw message.
+        search_query = user_message
+        if history:
+            try:
+                rewritten = invoke_with_retry(contextualize_chain, {
+                    "input": user_message, "chat_history": history}).strip()
+                if rewritten:
+                    search_query = rewritten
+            except Exception as e:
+                app.logger.warning("Question rewrite failed, using original message: %s", e)
+
+        docs = retriever.invoke(search_query)
+
+        # 4. Don't let the model guess when the reference books have nothing relevant
+        best_score = docs[0].metadata.get("relevance_score") if docs else None
+        if not docs or (best_score is not None and best_score < MIN_RELEVANCE_SCORE):
+            app.logger.info("Low relevance (best score %s) for %r; declining to answer",
+                            best_score, search_query)
+            text = safety.low_confidence_response()
+            yield "token", {"text": text}
+            yield finish(text, kind="low_confidence", notice=check.notice)
             return
-        print(f"{choice.title()} was not found; opening your default browser instead.")
-    webbrowser.open(url)
+
+        # 5. Stream the answer from the LLM
+        for chunk in stream_with_retry(question_answer_chain, {
+                "input": user_message, "chat_history": history, "context": docs}):
+            parts.append(chunk)
+            yield "token", {"text": chunk}
+
+        text = "".join(parts).strip()
+        if not text:
+            text = FALLBACK_ANSWER
+            yield "token", {"text": text}
+        yield finish(text, sources=format_sources(docs), notice=check.notice)
+
+    except GeneratorExit:
+        # The browser stopped the request (e.g. the "Stop" button); keep what was written
+        partial = "".join(parts).strip()
+        if partial:
+            storage.add_message(conversation_id, "assistant", partial + "\n\n*(stopped)*",
+                                sources=format_sources(docs))
+        raise
+    except Exception as e:
+        app.logger.exception("Error generating response: %s", e)
+        yield "error", {"text": ERROR_ANSWER}
+        storage.add_message(conversation_id, "assistant", ERROR_ANSWER, kind="error")
 
 
-def open_browser_when_ready(url, choice, timeout=120):
-    """Wait until the server answers, then open the browser (runs in a background thread)."""
-    import urllib.request
+# ── Request helpers ──────────────────────────────────────────────────────────
+def current_user_id():
+    """Anonymous per-browser id kept in the signed session cookie."""
+    if "uid" not in session:
+        session["uid"] = uuid.uuid4().hex
+        session.permanent = True
+    return session["uid"]
 
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        try:
-            urllib.request.urlopen(url, timeout=2)
-            break
-        except Exception:
-            time.sleep(0.5)
-    open_browser(url, choice)
+
+def _request_json():
+    return request.get_json(silent=True) or {}
+
+
+def _request_message():
+    return str(_request_json().get("message", "")).strip()[:4000]
+
+
+def _is_urgent_request():
+    """Emergency and crisis messages are never rate-limited."""
+    return safety.check_message(_request_message()).kind in (safety.EMERGENCY, safety.CRISIS)
+
+
+def _conversation_for_request(user_id):
+    """The conversation named in the request, or a new one if it's missing or not this user's."""
+    conv_id = _request_json().get("conversation_id")
+    conv = storage.get_conversation(user_id, conv_id) if conv_id else None
+    return conv or storage.create_conversation(user_id)
+
+
+def _sse(event, data):
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+# ── Pages ────────────────────────────────────────────────────────────────────
+@app.route("/")
+def index():
+    current_user_id()
+    return render_template('chat.html')
+
+
+# ── Chat endpoints ───────────────────────────────────────────────────────────
+@app.route("/api/chat/stream", methods=["POST"])
+@limiter.limit(CHAT_RATE_LIMIT, exempt_when=_is_urgent_request)
+def chat_stream():
+    """Server-Sent Events: "conversation", then "token"s as the answer is written, then "done"."""
+    user_id = current_user_id()
+    message = _request_message()
+    if not message:
+        return jsonify({"error": "Please enter a message."}), 400
+    conv = _conversation_for_request(user_id)
+
+    def generate():
+        yield _sse("conversation", {"id": conv["id"], "title": storage.make_title(message)
+                                    if conv["title"] == "New chat" else conv["title"]})
+        for event, data in answer_events(conv["id"], message):
+            yield _sse(event, data)
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.route("/chat", methods=["POST"])
+@limiter.limit(CHAT_RATE_LIMIT, exempt_when=_is_urgent_request)
+def chat():
+    """Non-streaming JSON API: {"message", "conversation_id"?} -> full answer at once."""
+    user_id = current_user_id()
+    message = _request_message()
+    if not message:
+        return jsonify({"response": "Please enter a message."})
+    conv = _conversation_for_request(user_id)
+
+    result = {"conversation_id": conv["id"]}
+    for event, data in answer_events(conv["id"], message):
+        if event == "done":
+            result.update({"response": data["content"], "message_id": data["message_id"],
+                           "sources": data["sources"], "notice": data["notice"], "kind": data["kind"]})
+        elif event == "error":
+            result.update({"response": data["text"], "kind": "error"})
+    return jsonify(result)
+
+
+# ── Conversation history & feedback ──────────────────────────────────────────
+@app.route("/api/conversations")
+def list_conversations():
+    return jsonify(storage.list_conversations(current_user_id()))
+
+
+@app.route("/api/conversations/<conv_id>")
+def get_conversation(conv_id):
+    conv = storage.get_conversation(current_user_id(), conv_id)
+    if not conv:
+        abort(404)
+    return jsonify({**conv, "messages": storage.get_messages(conv_id)})
+
+
+@app.route("/api/conversations/<conv_id>", methods=["PATCH"])
+def rename_conversation(conv_id):
+    title = str(_request_json().get("title", "")).strip()
+    if not title:
+        return jsonify({"error": "Title can't be empty."}), 400
+    if not storage.rename_conversation(current_user_id(), conv_id, title):
+        abort(404)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/conversations/<conv_id>", methods=["DELETE"])
+def delete_conversation(conv_id):
+    if not storage.delete_conversation(current_user_id(), conv_id):
+        abort(404)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/messages/<int:message_id>/feedback", methods=["POST"])
+def message_feedback(message_id):
+    value = _request_json().get("value")
+    if value not in (1, -1, None):
+        return jsonify({"error": "value must be 1, -1 or null"}), 400
+    if not storage.set_feedback(current_user_id(), message_id, value):
+        abort(404)
+    if value == -1:
+        app.logger.info("👎 feedback on message %s", message_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/feedback/summary")
+def feedback_summary():
+    """👍/👎 totals and recent 👎 answers across all users. Only available from this computer."""
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        abort(403)
+    return jsonify(storage.feedback_summary())
 
 
 if __name__ == '__main__':
     import argparse
+    from src.launcher import BROWSER_CHOICES, open_browser_when_ready
 
     parser = argparse.ArgumentParser(description="Run the Dr. Insight medical chatbot.")
     parser.add_argument("--browser", choices=BROWSER_CHOICES,
@@ -401,6 +488,6 @@ if __name__ == '__main__':
     if args.browser != "none" and os.environ.get("WERKZEUG_RUN_MAIN") != "true":
         url = f"http://localhost:{port}"
         print(f"Opening {url} in {'your default browser' if args.browser == 'default' else args.browser.title()}...")
-        threading.Thread(target=open_browser_when_ready, args=(url, args.browser), daemon=True).start()
+        open_browser_when_ready(url, args.browser)
 
-    app.run(host=host, port=port, debug=debug)
+    app.run(host=host, port=port, debug=debug, threaded=True)
