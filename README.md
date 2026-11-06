@@ -1,6 +1,6 @@
 # 🩺 MediRAG — Dr. Insight, an AI Medical Chatbot
 
-Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augmented Generation (RAG)**. It answers health questions using passages retrieved from the *Gale Encyclopedia of Medicine*, rather than relying only on what the language model remembers. This makes answers more grounded and less likely to be made up.
+Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augmented Generation (RAG)**. It answers health questions using passages retrieved from medical reference books (the *Gale Encyclopedia of Medicine* and OpenStax *Pharmacology for Nurses*), rather than relying only on what the language model remembers. Every answer lists the book and page it was based on.
 
 > ⚠️ **Disclaimer:** This project is for learning and demonstration only. It is **not** a substitute for professional medical advice, diagnosis, or treatment. Always consult a qualified doctor.
 
@@ -26,7 +26,11 @@ Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augment
 ## Features
 
 - 💬 Chat web interface (Flask + HTML/CSS/JS) with suggested starter questions
-- 📚 Answers grounded in a medical encyclopedia via vector search (Pinecone)
+- 📚 Answers grounded in ~1,900 pages of medical reference books: diseases **and** drugs
+- 📖 **Sources shown under every answer** (book + page number)
+- 🔎 **Hybrid search**: meaning-based vector search (Pinecone) + keyword search (BM25), so exact drug and disease names are always found
+- 🎯 **Reranking**: a cross-encoder model picks the 5 best passages out of ~40 candidates
+- 📏 **Built-in retrieval evaluation** (`eval_retrieval.py`) to measure changes with numbers
 - 🧠 Conversation memory: follow-ups like *"what are its treatments?"* are understood in context
 - ⚡ Instant replies for greetings like "hi", "thanks", "bye" (no API call needed)
 - 🩺 An empathetic "Dr. Insight" persona that recommends seeing a real doctor
@@ -35,23 +39,21 @@ Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augment
 ## How it works
 
 ```
-                ┌──────────────── one-time ingestion (store_index.py) ───────────────┐
- Data/*.pdf ──► PyPDFLoader ──► split into 300-char chunks ──► MiniLM embeddings ──► Pinecone index
-                └────────────────────────────────────────────────────────────────────┘
+ ── ingestion: store_index.py (run once, and again whenever Data/ changes) ─────────────────
+ Data/*.pdf ─► extract + clean text ─► 1000-char chunks (150 overlap) ─┬─► MiniLM embeddings ─► Pinecone (namespace medical_v2)
+                                                                       └─► artifacts/chunks.jsonl (for keyword search)
 
-                ┌──────────────── every chat message (app.py) ───────────────────────┐
- User question ──► MiniLM embedding ──► Pinecone: top 5 similar chunks
-                                              │
-                                              ▼
-                     System prompt + retrieved chunks + chat history + question
-                                              │
-                                              ▼
-                                      Mistral LLM ──► answer shown in the chat
-                └────────────────────────────────────────────────────────────────────┘
+ ── every chat message: app.py ──────────────────────────────────────────────────────────────
+ question ─► (follow-up? rewrite it as a standalone question with the LLM)
+          ─► vector search: top 20  ┐
+          ─► BM25 keyword search: top 20 ┴─► fuse (Reciprocal Rank Fusion) ─► cross-encoder rerank ─► best 5 passages
+          ─► Mistral LLM (system prompt + passages labelled with book/page + chat history)
+          ─► answer + list of sources shown in the chat
 ```
 
-1. **Ingestion (run once):** `store_index.py` reads the PDFs in `Data/` and splits them into small overlapping chunks. It turns each chunk into a 384-dimension vector with the `all-MiniLM-L6-v2` embedding model and uploads them to a Pinecone index named `medichatbot` (namespace `medical_data`).
-2. **Chatting:** `app.py` embeds the user's question and fetches the 5 most similar chunks from Pinecone. It passes them, together with the recent conversation, to a Mistral chat model, which writes the final answer.
+1. **Ingestion:** `store_index.py` reads every PDF in `Data/`, removes page footers and line-break hyphenation, and splits the text into 1000-character chunks with 150 characters of overlap. Each chunk keeps its book title and page number. Chunks are embedded with `all-MiniLM-L6-v2` (384 dimensions) and uploaded to the Pinecone index `medichatbot`, namespace `medical_v2`. A local copy is saved to `artifacts/chunks.jsonl` for keyword search.
+2. **Retrieval:** for each question, `src/retrieval.py` runs two searches. **Vector search** finds passages with the same *meaning*; **BM25** finds passages containing the same *words*, which matters for names like "metformin" that embeddings can blur. The two result lists are merged, then a **cross-encoder** (`ms-marco-MiniLM-L-6-v2`) reads the question together with each candidate and keeps the 5 that best answer it.
+3. **Answering:** `app.py` sends those 5 passages (each labelled with its book and page), the recent conversation and the question to a Mistral chat model. The answer is returned together with its sources.
 
 ## Tech stack
 
@@ -60,6 +62,8 @@ Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augment
 | Web server       | Flask                                                        |
 | RAG framework    | LangChain (0.3.x)                                            |
 | Embeddings       | `sentence-transformers/all-MiniLM-L6-v2` (runs locally, CPU) |
+| Keyword search   | BM25 (`rank_bm25`), in memory                                |
+| Reranker         | `cross-encoder/ms-marco-MiniLM-L-6-v2` (runs locally, CPU)   |
 | Vector database  | Pinecone (serverless, AWS `us-east-1`)                       |
 | LLM              | Mistral AI (default: `open-mistral-nemo`)                    |
 | PDF parsing      | pypdf via LangChain `PyPDFLoader`                            |
@@ -69,14 +73,20 @@ Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augment
 ```
 AI Medical-chatbot/
 ├── app.py               # Flask web app + RAG chain (main entry point)
-├── store_index.py       # One-time script: PDFs → chunks → embeddings → Pinecone
+├── store_index.py       # Builds the knowledge base: PDFs → chunks → Pinecone + local copy
+├── eval_retrieval.py    # Measures retrieval quality (Hit@5, MRR) for different setups
+├── eval/
+│   └── questions.json   # Test questions + keywords used by eval_retrieval.py
 ├── src/
-│   ├── helper.py        # PDF loading, text splitting, embedding model helpers
+│   ├── config.py        # Shared settings: index, namespace, chunk size, models, k values
+│   ├── helper.py        # PDF loading + cleaning, chunking, embeddings, chunk file I/O
+│   ├── retrieval.py     # Hybrid search (vector + BM25) and cross-encoder reranking
 │   └── prompt.py        # Alternative/basic system prompt (not used by app.py)
 ├── templates/
 │   └── chat.html        # Chat UI (HTML, CSS and JavaScript in one file)
 ├── static/              # Favicons, web manifest, style.css
-├── Data/                # Source PDF(s) — Gale Encyclopedia of Medicine
+├── Data/                # Source PDFs (not committed — see "Knowledge sources")
+├── artifacts/           # chunks.jsonl, generated by store_index.py (not committed)
 ├── research/
 │   └── trials.ipynb     # Notebook used to experiment while building the project
 ├── requirements.txt     # Python dependencies
@@ -180,23 +190,60 @@ FLASK_SECRET_KEY=any-long-random-string
 - `FLASK_SECRET_KEY` signs the browser session cookie that identifies your conversation. If it's not set, a random key is generated on each start, so conversations reset when the server restarts. Any random string works; you can generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
 - `.env` is listed in `.gitignore`. **Never commit your API keys.**
 
-### 6. Build the Pinecone index (first time only)
+### 6. Add the source PDFs
 
-> **Skip this step if your Pinecone account already has a `medichatbot` index with vectors in it.** You can check in the Pinecone console. Re-running it uploads the same chunks again.
+The PDFs live in `Data/`, which is **not** committed to Git (the files are large and the encyclopedia is copyrighted). Put these files in `Data/`:
 
-Make sure the PDF is in `Data/`, then run:
+| File name in `Data/` | Book | Where to get it |
+|----------------------|------|-----------------|
+| `Gale Encyclopedia of Medicine. Vol. 1. 2nd ed.pdf` | Gale Encyclopedia of Medicine, Vol. 1 (2nd ed.) | Your own copy (copyrighted) |
+| `OpenStax Pharmacology for Nurses.pdf` | OpenStax *Pharmacology for Nurses* (~1,200 pages, 47 MB) | Free from OpenStax, see below |
+
+Download the pharmacology book directly from OpenStax:
+
+```bash
+curl -L -o "Data/OpenStax Pharmacology for Nurses.pdf" https://assets.openstax.org/oscms-prodcms/media/documents/Pharmacology-WEB.pdf
+```
+
+You can add **any other medical PDFs** too: every `*.pdf` in `Data/` is indexed. To show a friendly book title under answers instead of the file name, add the file to `SOURCE_TITLES` in `src/config.py`.
+
+### 7. Build the knowledge base
 
 ```bash
 python store_index.py
 ```
 
 This will:
-1. Load every PDF in `Data/`
-2. Split them into chunks (~12,000 chunks for the included encyclopedia)
-3. Create the `medichatbot` index (384 dimensions, cosine metric) if it does not exist
-4. Embed and upload all chunks to the `medical_data` namespace
+1. Load and clean every PDF in `Data/` (removing page footers and words hyphenated across lines)
+2. Split the text into 1000-character chunks with 150 characters of overlap (7,823 chunks for the two books above)
+3. Save a copy of the chunks to `artifacts/chunks.jsonl`, used for keyword search
+4. Create the `medichatbot` Pinecone index (384 dimensions, cosine metric) if it doesn't exist
+5. Clear the `medical_v2` namespace, then embed and upload all chunks to it
 
-It takes several minutes, depending on your CPU and connection. At the end it prints the total vector count.
+It takes about 10 minutes on a typical laptop CPU (about 2.5 to read the PDFs, 7.5 to embed and upload). **Run it again whenever you add, remove or change PDFs.** It replaces the namespace's contents, so the index always matches `Data/`.
+
+> The app needs **both** Pinecone and `artifacts/chunks.jsonl`. If the chunk file is missing (for example on a new computer), the app still works but skips keyword search. Run `store_index.py` once to restore it.
+
+### 8. (Optional) Measure retrieval quality
+
+```bash
+python eval_retrieval.py
+```
+
+This asks the 16 test questions in `eval/questions.json` and checks whether a passage containing the expected keywords comes back in the top 5. It compares the original setup with each improvement. No LLM calls are made, so it is free. Add `--verbose` to see the top source for each question.
+
+Results on the current knowledge base:
+
+| Setup | Hit@5 | MRR | Seconds / question |
+|-------|------:|----:|-------------------:|
+| Original: 300-char chunks, encyclopedia only, vector search | 56% | 0.52 | 0.6 |
+| 1000-char chunks + pharmacology book, vector search | 94% | 0.82 | 0.3 |
+| + BM25 keyword search (hybrid) | 94% | 0.86 | 0.3 |
+| **+ cross-encoder reranker (what the app uses)** | **100%** | **0.90** | 2.5 |
+
+- **Hit@5**: share of questions where a relevant passage was in the top 5.
+- **MRR** (mean reciprocal rank): 1.0 means the relevant passage was always ranked first; 0.5 means it was second on average.
+- Keyword matching is a rough automatic judge, so use these numbers to compare setups rather than as absolute accuracy. The old setup only had the encyclopedia, so it can't answer the drug questions at all.
 
 ---
 
@@ -259,11 +306,14 @@ Running without activating the venv (Windows):
 
 | Setting | File | Default |
 |---------|------|---------|
-| Pinecone index name | `app.py`, `store_index.py` | `medichatbot` |
-| Pinecone namespace | `app.py`, `store_index.py` | `medical_data` |
-| Chunks retrieved per question (`k`) | `app.py` | `5` |
+| Pinecone index name | `src/config.py` (`INDEX_NAME`) | `medichatbot` |
+| Pinecone namespace | `src/config.py` (`NAMESPACE`), or `PINECONE_NAMESPACE` in `.env` | `medical_v2` |
+| Candidates per search / passages sent to the LLM | `src/config.py` (`CANDIDATES_PER_RETRIEVER`, `FINAL_K`) | `20` / `5` |
+| Vector vs. keyword weight when merging results | `src/config.py` (`VECTOR_WEIGHT`) | `0.6` / `0.4` |
+| Reranker model | `src/config.py` (`RERANKER_MODEL`) | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| Book titles shown in sources | `src/config.py` (`SOURCE_TITLES`) | Gale, OpenStax Pharmacology |
 | LLM temperature | `app.py` | `0.2` |
-| Chunk size / overlap | `src/helper.py` | `300` / `50` characters |
+| Chunk size / overlap (rerun `store_index.py` after changing) | `src/config.py` (`CHUNK_SIZE`, `CHUNK_OVERLAP`) | `1000` / `150` characters |
 | Chat history length sent to the LLM | `app.py` (`MAX_HISTORY_MESSAGES`) | last 8 messages |
 | Quick replies for greetings | `app.py` (`QUICK_RESPONSES`, `GREETING_ALIASES`) | hi, hello, thanks, bye, … |
 | System prompt / persona | `app.py` (`system_prompt`) | "Dr. Insight" |
@@ -285,8 +335,15 @@ Send a message and get the bot's reply.
 
 **Response:**
 ```json
-{ "response": "Migraines are ..." }
+{
+  "response": "Migraines are ...",
+  "sources": [
+    { "title": "Gale Encyclopedia of Medicine, Vol. 1", "page": "412" },
+    { "title": "OpenStax Pharmacology for Nurses", "page": "301" }
+  ]
+}
 ```
+`sources` lists the book and page of each passage the answer was based on, best match first. It is omitted for instant greeting replies.
 
 Example with curl:
 ```bash
@@ -304,7 +361,10 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 | Error `403 ... not available in your subscription tier` | Your Mistral plan can't use the configured model. Set `MISTRAL_MODEL=open-mistral-nemo` in `.env`. |
 | Error `429 Rate limit exceeded` | The Mistral free tier allows about 1 request per second, and has monthly limits per model. Wait a moment, send messages more slowly, or switch `MISTRAL_MODEL`. |
 | Answers say there isn't enough information | The Pinecone index is empty or has a different name or namespace. Check the vector count in the Pinecone console, or run `store_index.py`. |
-| `Index 'medichatbot' not found` | You haven't run `store_index.py` on this Pinecone account yet (step 6). |
+| `Index 'medichatbot' not found` | You haven't run `store_index.py` on this Pinecone account yet (step 7). |
+| Log says `chunks.jsonl not found; keyword search disabled` | Run `python store_index.py` to create `artifacts/chunks.jsonl`. |
+| `No PDF text found in .../Data` | Put the PDFs in `Data/` first (step 6). |
+| `not enough memory` while indexing or chatting | Indexing and the app each load AI models. Close other heavy programs, and don't run `store_index.py` while the app is running. |
 | `ModuleNotFoundError` (e.g. `langchain_huggingface`, `src`) | The venv isn't activated, or dependencies aren't installed. Activate `.venv` and rerun `pip install -r requirements.txt`. |
 | PyTorch download is huge / slow | You installed the default GPU build. Uninstall it and install the CPU build with the command in step 4. |
 | Hugging Face "symlinks" warning on Windows | Harmless. To hide it, set `HF_HUB_DISABLE_SYMLINKS_WARNING=1`, or enable Windows Developer Mode. |
@@ -318,7 +378,7 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 - **Add more knowledge:** drop more PDFs into `Data/` and rerun `store_index.py`.
 - **Change the persona:** edit `system_prompt` in `app.py`.
 - **Use a different LLM:** swap `ChatMistralAI` for another LangChain chat model (OpenAI, Anthropic, Groq, a local Ollama model, ...).
-- **Show sources:** `rag_chain.invoke(...)` also returns `context` (the retrieved chunks). Return their page numbers to the UI to cite sources.
+- **Tune retrieval:** change chunk size, `FINAL_K` or `VECTOR_WEIGHT` in `src/config.py`, rebuild, then rerun `eval_retrieval.py` to see whether it helped. Add your own questions to `eval/questions.json`.
 - **Deploy:** run behind a production WSGI server (e.g. `waitress` on Windows, `gunicorn` on Linux) (keep `FLASK_DEBUG` off).
 
 ---

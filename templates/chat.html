@@ -310,6 +310,35 @@
     }
     .msg-row.user .msg-meta { justify-content: flex-end; }
 
+    /* sources under bot answers */
+    .msg-sources {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface2);
+      max-width: 100%;
+    }
+    .msg-sources summary {
+      cursor: pointer;
+      padding: 6px 10px;
+      color: var(--accent);
+      list-style: none;
+      user-select: none;
+    }
+    .msg-sources summary::-webkit-details-marker { display: none; }
+    .msg-sources summary::after { content: ' ▸'; }
+    .msg-sources[open] summary::after { content: ' ▾'; }
+    .msg-sources ul { list-style: none; padding: 0 10px 8px; margin: 0; }
+    .msg-sources li {
+      display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+      padding: 3px 0;
+      border-top: 1px solid var(--border);
+    }
+    .msg-sources .src-title { color: var(--text); }
+    .msg-sources .src-page { white-space: nowrap; color: var(--accent); opacity: 0.8; }
+
     /* typing */
     .typing-bubble {
       display: flex; align-items: center; gap: 5px;
@@ -493,7 +522,7 @@
         </div>
         <div class="bot-info">
           <div class="bot-name">Dr. Insight</div>
-          <div class="bot-sub">RAG-Enhanced · Mistral Large · Pinecone</div>
+          <div class="bot-sub">RAG-Enhanced · Mistral AI · Hybrid search + reranking</div>
         </div>
         <div class="scan-line"></div>
       </div>
@@ -575,6 +604,8 @@
     }
 
     function formatBotText(text) {
+      // Escape first so model output can never inject HTML
+      text = escapeHtml(text);
       // Bold **text**
       text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
       // Convert newlines
@@ -582,7 +613,19 @@
       return text;
     }
 
-    function appendMessage(role, text) {
+    function sourcesHtml(sources) {
+      if (!sources || !sources.length) return '';
+      const items = sources.map(s =>
+        `<li><span class="src-title">${escapeHtml(s.title)}</span>${s.page ? `<span class="src-page">p. ${escapeHtml(s.page)}</span>` : ''}</li>`
+      ).join('');
+      return `
+        <details class="msg-sources">
+          <summary>📖 Sources (${sources.length})</summary>
+          <ul>${items}</ul>
+        </details>`;
+    }
+
+    function appendMessage(role, text, sources) {
       const row = document.createElement('div');
       row.className = `msg-row ${role}`;
 
@@ -603,6 +646,7 @@
         ${avatarHtml}
         <div>
           <div class="msg-bubble">${displayText}</div>
+          ${role === 'bot' ? sourcesHtml(sources) : ''}
           <div class="msg-meta">${label} · ${getTime()}</div>
         </div>
       `;
@@ -660,7 +704,7 @@
         });
         const data = await res.json();
         removeTyping();
-        appendMessage('bot', data.response || "I'm not sure how to respond to that.");
+        appendMessage('bot', data.response || "I'm not sure how to respond to that.", data.sources);
       } catch (err) {
         removeTyping();
         appendMessage('bot', '⚠️ Connection error. Please check your network and try again.');

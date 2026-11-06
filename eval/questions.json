@@ -1,0 +1,18 @@
+[
+  {"question": "What are the symptoms of appendicitis?", "keywords": ["appendicitis", "pain"]},
+  {"question": "What causes acne?", "keywords": ["acne", "sebaceous"]},
+  {"question": "How is asthma treated?", "keywords": ["asthma", "bronchodilator"]},
+  {"question": "What are the early signs of Alzheimer's disease?", "keywords": ["alzheimer", "memory"]},
+  {"question": "What is anemia?", "keywords": ["anemia", "hemoglobin"]},
+  {"question": "What are the symptoms of alcohol withdrawal?", "keywords": ["alcohol", "withdrawal"]},
+  {"question": "How is HIV transmitted?", "keywords": ["hiv", "transmi"]},
+  {"question": "What are the symptoms of bronchitis?", "keywords": ["bronchitis", "cough"]},
+  {"question": "What is anaphylaxis and how is it treated?", "keywords": ["anaphyla", "epinephrine"]},
+  {"question": "What is the antidote for an opioid overdose?", "keywords": ["naloxone", "opioid"]},
+  {"question": "What are the side effects of metformin?", "keywords": ["metformin", "lactic acidosis"]},
+  {"question": "Which drugs interact with warfarin?", "keywords": ["warfarin", "bleeding"]},
+  {"question": "What are the signs of digoxin toxicity?", "keywords": ["digoxin", "toxicity"]},
+  {"question": "How does insulin lower blood sugar?", "keywords": ["insulin", "glucose"]},
+  {"question": "What are the adverse effects of ACE inhibitors?", "keywords": ["ace inhibitor", "cough"]},
+  {"question": "Can people allergic to penicillin take amoxicillin?", "keywords": ["penicillin", "allerg"]}
+]

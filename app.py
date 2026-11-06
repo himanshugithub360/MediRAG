@@ -2,12 +2,14 @@ from flask import Flask, jsonify, request, render_template, session
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from langchain_pinecone import PineconeVectorStore
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_mistralai import ChatMistralAI
 from collections import OrderedDict
 from dotenv import load_dotenv
+from src.config import INDEX_NAME, NAMESPACE
+from src.helper import download_hugging_face_embeddings
+from src.retrieval import build_retriever
 import os
 import re
 import secrets
@@ -31,8 +33,7 @@ if missing:
 os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
 os.environ["MISTRAL_API_KEY"] = MISTRAL_API_KEY
 
-index_name = "medichatbot"
-embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+embeddings = download_hugging_face_embeddings()
 
 system_prompt = (
     "You are Dr. Insight, a knowledgeable and empathetic AI medical assistant. "
@@ -40,8 +41,10 @@ system_prompt = (
     "Be concise, clear, and compassionate. If the context does not contain enough information to answer, say so honestly. "
     "Never fabricate medical facts. Always recommend consulting a real doctor for diagnosis or treatment. "
     "For emotional statements, acknowledge the person's feelings first before providing information.\n"
-    "The reference passages below were retrieved from a medical encyclopedia by the system; the user did not "
+    "The reference passages below were retrieved from medical reference books by the system; the user did not "
     "write or provide them, so never refer to them as something the user said or shared. "
+    "Each passage starts with its book and page in square brackets. Don't add citations to your answer; "
+    "the sources are shown to the user separately. Ignore passages that are not relevant to the question. "
     "For questions about the conversation itself, rely only on the chat messages.\n\n"
     "Reference passages:\n{context}"
 )
@@ -59,17 +62,15 @@ contextualize_prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
 ])
 
-# Use the correct namespace matching store_index.py
+# Namespace and index come from src/config.py, shared with store_index.py
 docsearch = PineconeVectorStore.from_existing_index(
-    index_name=index_name,
+    index_name=INDEX_NAME,
     embedding=embeddings,
-    namespace="medical_data"
+    namespace=NAMESPACE
 )
 
-retriever = docsearch.as_retriever(
-    search_type="similarity",
-    search_kwargs={"k": 5}
-)
+# Vector search + BM25 keyword search, fused and reranked (see src/retrieval.py)
+retriever = build_retriever(docsearch)
 
 llm = ChatMistralAI(
     # Override via MISTRAL_MODEL in .env (e.g. mistral-large-latest on a paid tier)
@@ -84,7 +85,9 @@ prompt = ChatPromptTemplate.from_messages([
     ("human", "{input}"),
 ])
 
-question_answer_chain = create_stuff_documents_chain(llm, prompt)
+# Label each passage with its book and page so the model knows where facts come from
+document_prompt = PromptTemplate.from_template("[{source}, page {page}]\n{page_content}")
+question_answer_chain = create_stuff_documents_chain(llm, prompt, document_prompt=document_prompt)
 contextualize_chain = contextualize_prompt | llm | StrOutputParser()
 
 
@@ -231,7 +234,20 @@ def chat():
         return jsonify({"response": "I'm having trouble processing that request. Please try again."})
 
     append_history(conv_id, user_message, bot_response)
-    return jsonify({"response": bot_response})
+    return jsonify({"response": bot_response, "sources": format_sources(docs)})
+
+
+def format_sources(docs):
+    """Unique (book, page) pairs for the passages the answer was based on, best match first."""
+    sources, seen = [], set()
+    for doc in docs:
+        title = doc.metadata.get("source", "Unknown source")
+        page = str(doc.metadata.get("page", "")).strip()
+        if (title, page) in seen:
+            continue
+        seen.add((title, page))
+        sources.append({"title": title, "page": page})
+    return sources
 
 
 # ── Auto-open the chat in a browser on startup ───────────────────────────────
