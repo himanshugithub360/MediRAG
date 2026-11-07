@@ -1,0 +1,21 @@
+# Render Blueprint: deploys the app to Render's free tier (no credit card needed).
+# Render reads this file when you create a "Blueprint" from this GitHub repo. See README >
+# "Free deployment (Render)". It redeploys automatically after every push to main whose
+# GitHub Actions checks (tests + Docker builds) pass.
+services:
+  - type: web
+    name: medirag
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.render
+    healthCheckPath: /healthz
+    autoDeployTrigger: checksPass
+    envVars:
+      # Secrets: Render asks for these values when you create the Blueprint
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      # Signs the session cookie; Render generates a random value once
+      - key: FLASK_SECRET_KEY
+        generateValue: true

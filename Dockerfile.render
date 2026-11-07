@@ -1,0 +1,43 @@
+# Dr. Insight (MediRAG): lightweight image for Render's free tier (512 MB RAM, 0.1 CPU).
+#
+# Same app as the main Dockerfile, with RETRIEVER=lite: the question is embedded with an
+# ONNX copy of the index's model (no PyTorch) and reranked by Pinecone's hosted reranker.
+# Uses about 250 MB of RAM. API keys are set in the Render dashboard, never in the image.
+#
+#   docker build -f Dockerfile.render -t medirag-lite .
+#   docker run --env-file .env -p 10000:10000 medirag-lite      -> http://localhost:10000
+
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    RETRIEVER=lite \
+    FASTEMBED_CACHE_PATH=/app/.models \
+    HF_HUB_DISABLE_TELEMETRY=1 \
+    TRUST_PROXY=1 \
+    BACKGROUND_WARMUP=1 \
+    OMP_NUM_THREADS=1 \
+    HOST=0.0.0.0 \
+    PORT=10000
+
+RUN useradd --create-home --uid 1000 user
+WORKDIR /app
+RUN chown user:user /app
+
+COPY requirements-lite.txt .
+RUN pip install -r requirements-lite.txt
+
+# Bake the ONNX embedding model (~90 MB) into the image so each wake-up doesn't download it
+USER user
+RUN python -c "from fastembed import TextEmbedding; \
+TextEmbedding('sentence-transformers/all-MiniLM-L6-v2', cache_dir='/app/.models')"
+
+COPY --chown=user . .
+
+EXPOSE 10000
+
+# The port opens right away; models load in the background (see wsgi.py) and /healthz turns
+# 200 when they're ready. One worker keeps memory low; threads serve visitors in parallel.
+CMD ["sh", "-c", "gunicorn wsgi:app --bind 0.0.0.0:${PORT} --workers 1 --threads 4 --timeout 300 --access-logfile - --error-logfile -"]

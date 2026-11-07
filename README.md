@@ -23,7 +23,7 @@ You can also **upload a lab report, prescription or photo** and ask about it, ch
 11. [API reference](#api-reference)
 12. [Running the tests](#running-the-tests)
 13. [Docker](#docker)
-14. [Free deployment (Hugging Face Spaces)](#free-deployment-hugging-face-spaces)
+14. [Free deployment (Render)](#free-deployment-render)
 15. [Troubleshooting](#troubleshooting)
 16. [Customisation ideas](#customisation-ideas)
 
@@ -52,7 +52,7 @@ You can also **upload a lab report, prescription or photo** and ask about it, ch
 - 💊 **No personal dosing or prescribing**: requests like *"how much paracetamol should I take?"* are politely declined
 - 🙅 **Won't guess**: if the books have nothing relevant, the bot says so instead of making something up
 - ⏳ **Rate limiting**: protects the app and keeps Mistral's free-tier limit from being hit
-- 🐳 **Docker + free public deployment** on Hugging Face Spaces, with **GitHub Actions** running the tests on every push
+- 🐳 **Docker + free public deployment** on Render (a lightweight mode fits its 512 MB free tier), with **GitHub Actions** running the tests on every push
 - 📏 **Built-in retrieval evaluation** (`eval_retrieval.py`) to measure changes with numbers
 - 🧠 Conversation memory: follow-ups like *"what are its treatments?"* are understood in context
 - ⚡ Instant replies for greetings like "hi", "thanks", "bye" (no API call needed)
@@ -111,10 +111,10 @@ AI Medical-chatbot/
 ├── Dockerfile           # Production image (gunicorn, CPU-only PyTorch, models baked in)
 ├── .dockerignore        # Keeps .env, Data/, chat history etc. out of the image
 ├── .github/workflows/
-│   └── ci.yml           # Tests on every push, Docker build check, deploy to Hugging Face
-├── deploy/
-│   ├── deploy_to_hf.py  # Uploads the app to a Hugging Face Space
-│   └── huggingface/README.md  # The Space's settings + description
+│   └── ci.yml           # Tests + Docker build checks on every push (Render deploys after they pass)
+├── Dockerfile.render    # Lightweight image for Render's free tier (no PyTorch, ~250 MB RAM)
+├── render.yaml          # Render Blueprint: free web service, auto-deploy, health check
+├── requirements-lite.txt # Dependencies of the lightweight image
 ├── fetch_sources.py     # Downloads MedlinePlus topics + WHO fact sheets into Data/web/
 ├── store_index.py       # Builds the knowledge base: PDFs + web content → chunks → Pinecone + local copy
 ├── eval_retrieval.py    # Measures retrieval quality (Hit@5, MRR) for different setups
@@ -123,7 +123,8 @@ AI Medical-chatbot/
 ├── src/
 │   ├── config.py        # ALL settings in one place (reads .env)
 │   ├── helper.py        # PDF loading + cleaning, chunking, embeddings, chunk file I/O
-│   ├── retrieval.py     # Hybrid search (vector + BM25) and cross-encoder reranking
+│   ├── retrieval.py     # Full mode: hybrid search (vector + BM25) and cross-encoder reranking
+│   ├── retrieval_lite.py # Lite mode: ONNX embedding + Pinecone search + hosted reranker
 │   ├── safety.py        # Emergency, crisis and dosage detection + their responses
 │   ├── storage.py       # SQLite: saved conversations, messages, uploads and 👍/👎 feedback
 │   ├── documents.py     # Reading uploaded PDFs/photos (pypdf + vision model)
@@ -132,6 +133,7 @@ AI Medical-chatbot/
 ├── tests/
 │   ├── conftest.py      # Fake AI services so tests need no keys or network
 │   ├── test_app.py      # 27 API tests: /chat, streaming, greetings, errors, uploads, ...
+│   ├── test_retrieval_lite.py # 5 tests for lite mode (rerank fallback, thresholds, filters)
 │   ├── test_safety.py   # 58 tests for the safety rules (English, Hindi, Hinglish)
 │   ├── test_storage.py  # 6 tests for saved chats and feedback
 │   └── test_languages.py # 3 tests for language detection
@@ -462,8 +464,11 @@ On phones, the helpline numbers are tappable links that start a call.
 | `PORT`              | ❌       | `8080`              | Port the web server listens on |
 | `HOST`              | ❌       | `127.0.0.1`         | Address to listen on. Use `0.0.0.0` to allow other devices on your network (ignored while debug mode is on) |
 | `FLASK_DEBUG`       | ❌       | off                 | `1` enables auto-reload and the debugger (dev server only). Never enable it on a network-visible server |
-| `TRUST_PROXY`       | ❌       | off                 | `1` behind a hosting proxy (Hugging Face, Render…) so rate limits use each visitor's real IP |
-| `CROSS_SITE_COOKIES` | ❌      | off                 | `1` when the app is shown inside another site's iframe over HTTPS (the Hugging Face Space page) |
+| `RETRIEVER`         | ❌       | `full`              | `full` (local PyTorch models, best quality, ~2 GB RAM) or `lite` (fits 512 MB; see [Free deployment](#free-deployment-render)) |
+| `RERANK_MODEL`      | ❌       | `bge-reranker-v2-m3` | Lite mode: Pinecone-hosted reranker. Empty = vector order only |
+| `MIN_RERANK_SCORE` / `MIN_VECTOR_SCORE` | ❌ | `0.2` / `0.45` | Lite mode "won't guess" thresholds (hosted-reranker score / cosine similarity) |
+| `TRUST_PROXY`       | ❌       | off                 | `1` behind a hosting proxy (Render etc.) so rate limits use each visitor's real IP |
+| `CROSS_SITE_COOKIES` | ❌      | off                 | `1` when the app is shown inside another site's iframe over HTTPS |
 | `CHUNKS_FROM_PINECONE` | ❌    | on                  | If `artifacts/chunks.jsonl` is missing, rebuild it from Pinecone at startup (needed on servers) |
 | `INSTANCE_DIR` / `CHAT_DB_PATH` | ❌ | `instance/`, `instance/medirag.db` | Where chat history, uploads and the secret key are stored |
 | `MAX_UPLOAD_MB`     | ❌       | `10`                | Largest file users can upload |
@@ -570,9 +575,10 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 
 ## Running the tests
 
-There are 94 automated tests:
+There are 99 automated tests:
 
 - **27 API tests** for the Flask app: `/chat` and streaming answers, greeting logic, follow-up rewriting, Hindi translation, source filter, safety paths, **error handling** (LLM failure, Mistral 429 retry, rate limit, empty and malformed requests), symptom checker, PDF and image uploads, privacy between users, feedback and the health check. The AI parts are replaced by fakes (`tests/conftest.py`), so they run in seconds without API keys, model downloads or network.
+- **5 for lite mode**: hosted-rerank order, fallback when the free monthly reranks run out, source filter, thresholds.
 - **58 for the safety rules**: emergencies, crises, dosage requests, general questions that should only get a notice, normal questions that must pass through untouched, and Hindi/Hinglish emergency phrases.
 - **6 for saved chats**: titles, privacy between users, message order, feedback rules and deletion.
 - **3 for language detection**: the 8 Indian scripts, English/Hinglish, and explicit language choice.
@@ -593,12 +599,16 @@ When you change a rule in `src/safety.py`, add the message that prompted the cha
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request (free on public GitHub repos):
 
 1. **Tests**: installs the dependencies (CPU-only PyTorch) and runs `pytest`
-2. **Docker image builds**: checks the `Dockerfile` still builds (not pushed anywhere)
-3. **Deploy**: on pushes to `main`, uploads the app to your Hugging Face Space, *only if* you've set it up (see [Free deployment](#free-deployment-hugging-face-spaces)); otherwise it's skipped with a notice
+2. **Docker image builds**: checks both `Dockerfile` and `Dockerfile.render` still build (not pushed anywhere)
 
-See the results under the repo's **Actions** tab. A green ✅ next to a commit means all of the above passed.
+See the results under the repo's **Actions** tab. A green ✅ next to a commit means all of the above passed. Render only deploys commits that pass (see below).
 
 ## Docker
+
+There are two images:
+
+- **`Dockerfile`** (full quality, ~2 GB RAM): for your own computer or a bigger server.
+- **`Dockerfile.render`** (lite, ~250 MB RAM): for free hosting; see [Free deployment](#free-deployment-render).
 
 The [`Dockerfile`](Dockerfile) builds a production image: Python 3.12, CPU-only PyTorch, the embedding and reranker models baked in, and **gunicorn** (1 worker × 8 threads, so the models are loaded once) serving on port 7860. API keys are **not** in the image; you pass them when starting it.
 
@@ -611,49 +621,52 @@ docker run --rm --env-file .env -p 7860:7860 medirag
 
 Then open <http://localhost:7860>. On the first start the container downloads the keyword-search index from Pinecone (about 3 minutes); `GET /healthz` returns `{"status": "ok"}` once it's ready. Chat history lives inside the container and is lost when it's removed; add `-v medirag-data:/app/instance` to keep it.
 
-## Free deployment (Hugging Face Spaces)
+## Free deployment (Render)
 
-A public demo link for your portfolio, **free**: Hugging Face Spaces' free CPU tier (2 vCPU, 16 GB RAM) runs the Docker image as is. (Render's free tier has 512 MB of RAM, too little for the AI models, and Railway no longer has a free tier.) Pinecone and Mistral stay on their free tiers too.
+A public demo link for your portfolio, **free and with no credit card**, on [Render](https://render.com)'s free tier. Pinecone and Mistral stay on their free tiers too.
 
-**One-time setup (about 10 minutes, no credit card):**
+> **Why Render, and why a "lite" mode?** Hugging Face Spaces now requires a paid PRO plan to run Docker apps, Railway has no free tier, and Render's free tier has only **512 MB of RAM and 0.1 CPU**: too small for the PyTorch models. So the free deployment uses `RETRIEVER=lite` ([`src/retrieval_lite.py`](src/retrieval_lite.py)):
+>
+> | | Full mode (your computer) | Lite mode (Render) |
+> |---|---|---|
+> | Question embedding | PyTorch `all-MiniLM-L6-v2` | **Same model** in ONNX Runtime (identical vectors, no re-index needed) |
+> | Search | Pinecone + BM25 keyword search (top 40) | Pinecone (top 20) |
+> | Reranking | Local cross-encoder | Pinecone's hosted `bge-reranker-v2-m3` (free: 500/month), then vector order once those run out |
+> | Retrieval quality (16 test questions) | Hit@5 100%, MRR 0.87 | Hit@5 100%, MRR 0.82 (0.81 without reranks) |
+> | RAM | ~2 GB | ~250 MB |
+>
+> Everything else (safety rules, languages, uploads, voice, symptom checker) is the same.
 
-1. **Create a free Hugging Face account** at <https://huggingface.co/join>.
-2. **Create an access token**: <https://huggingface.co/settings/tokens> → *Create new token* → type **Write** → copy it (starts with `hf_`).
-3. **Add secrets to the GitHub repo**: on GitHub open *Settings → Secrets and variables → Actions*.
-   - Tab **Secrets** → *New repository secret*, add these four:
+**One-time setup (about 10 minutes):**
 
-     | Name | Value |
-     |------|-------|
-     | `HF_TOKEN` | the Hugging Face token from step 2 |
-     | `PINECONE_API_KEY` | same as in your `.env` |
-     | `MISTRAL_API_KEY` | same as in your `.env` |
-     | `FLASK_SECRET_KEY` | a long random string, e.g. from `python -c "import secrets; print(secrets.token_hex(32))"` |
+1. **Sign up** at <https://dashboard.render.com/register> with **"GitHub"** (free, no card).
+2. In the Render dashboard click **New + → Blueprint**.
+3. **Connect your GitHub repo** `MediRAG` (allow Render access to it when asked) and click **Connect**. Render reads [`render.yaml`](render.yaml).
+4. It asks for two secret values. Paste them from your `.env` file:
+   - `PINECONE_API_KEY`
+   - `MISTRAL_API_KEY`
 
-   - Tab **Variables** → *New repository variable*: `HF_SPACE_ID` = `your-hf-username/medirag`
-4. **Deploy**: push any commit to `main`, or open the *Actions* tab → *CI* → *Run workflow*. When the **Deploy** job finishes, the Space builds the image (about 5–10 minutes the first time).
+   (`FLASK_SECRET_KEY` is generated automatically.)
+5. Click **Apply** / **Deploy Blueprint**. The first build takes about 5–10 minutes. When the service shows **Live**, open its URL:
 
-Your app is then live at:
-- **Space page:** `https://huggingface.co/spaces/your-hf-username/medirag`
-- **Direct link (recommended to share):** `https://your-hf-username-medirag.hf.space`
+   **`https://medirag.onrender.com`** (or `https://medirag-xxxx.onrender.com` if that name is taken; it's shown at the top of the service page)
 
-From then on, **every push to `main` that passes the tests redeploys automatically**.
-
-The workflow creates the Space, stores the keys as Space **secrets** (never visible in the Space's files), sets `TRUST_PROXY` and `CROSS_SITE_COOKIES`, and uploads only the files the app needs (never `.env`, `Data/` or chat history). The book PDFs aren't uploaded either: the server rebuilds its keyword index from the text already in your Pinecone index.
-
-You can also deploy from your own computer instead of GitHub Actions:
-```bash
-pip install huggingface_hub
-```
-```bash
-set HF_TOKEN=hf_your_token&& set HF_SPACE_ID=your-hf-username/medirag&& python deploy/deploy_to_hf.py
-```
-(Then add `PINECONE_API_KEY`, `MISTRAL_API_KEY` and `FLASK_SECRET_KEY` under the Space's *Settings → Variables and secrets*, or set them in the same command.)
+From then on, **every push to `main` redeploys automatically, but only after GitHub Actions passes** (`autoDeployTrigger: checksPass`).
 
 **Limits of the free tier, good to know:**
-- The Space **sleeps after 48 hours without visitors**. The next visit wakes it up, which takes a few minutes (it reloads the models and the keyword index).
-- Its disk is temporary: **saved chats and uploads are cleared whenever the Space restarts**. Fine for a demo; don't rely on it for anything important.
-- Everyone using the demo shares your **Mistral free-tier quota**. The per-visitor rate limit (10 messages/minute, 100/day) protects it; lower `CHAT_RATE_LIMIT` in the Space's variables if needed.
-- The Space and your GitHub repo are public, but your keys stay private as secrets.
+- The app **sleeps after 15 minutes without visitors**. The next visit wakes it up in about a minute (the page loads once the app is ready).
+- Its disk is temporary: **saved chats and uploads are cleared whenever it restarts or redeploys**. Fine for a demo.
+- Free hosted reranks: **500 per month** for your Pinecone account. After that, answers use the vector-search order until the next month (slightly lower quality, still sourced and safe).
+- Everyone using the demo shares your **Mistral free-tier quota**. The per-visitor rate limit (10 messages/minute, 100/day) protects it; lower `CHAT_RATE_LIMIT` under the service's **Environment** tab if needed.
+- 750 free instance-hours per month: enough for one always-available service.
+
+**Try lite mode on your computer** (optional):
+```bash
+pip install -r requirements-lite.txt
+```
+```bash
+set RETRIEVER=lite&& python serve.py
+```
 
 ## Troubleshooting
 
@@ -686,9 +699,9 @@ set HF_TOKEN=hf_your_token&& set HF_SPACE_ID=your-hf-username/medirag&& python d
 | *"Couldn't find any readable text in that PDF"* | The PDF is scanned and the vision model couldn't read it. Upload a clearer photo of the page instead. |
 | Uploading a photo gives a 429 / rate-limit message | Image reading uses a Mistral vision call; the free tier is limited. Wait a minute. |
 | MedlinePlus / WHO sources never appear | Run `python fetch_sources.py`, then `python store_index.py`. |
-| GitHub Actions **Deploy** job says *"Skipping deploy"* | Add the `HF_TOKEN` secret and `HF_SPACE_ID` variable (see [Free deployment](#free-deployment-hugging-face-spaces)). |
-| The Space shows *"Runtime error"* | Open the Space's **Logs** tab. Usually a missing `PINECONE_API_KEY` / `MISTRAL_API_KEY` secret; add it in the Space settings and click *Restart*. |
-| The Space page keeps forgetting my chats | Your browser blocks cookies inside the embedded page. Use the direct `https://…hf.space` link instead. |
+| Render deploy fails, or the service never becomes **Live** | Open the service's **Logs** tab. Usually a missing or wrong `PINECONE_API_KEY` / `MISTRAL_API_KEY`; fix it under **Environment**, then **Manual Deploy → Deploy latest commit**. |
+| Render didn't redeploy after a push | It waits for GitHub Actions to pass. Check the **Actions** tab for a red ❌. |
+| The demo takes ~1 minute to open | It was asleep (free tier sleeps after 15 idle minutes). Normal. |
 | `docker: ... daemon is not running` | Start Docker Desktop and wait until it says *Engine running*. |
 | Install fails on Python 3.13/3.14 | Some packages lack wheels for very new Python versions. Use Python 3.12. |
 
@@ -698,7 +711,7 @@ set HF_TOKEN=hf_your_token&& set HF_SPACE_ID=your-hf-username/medirag&& python d
 - **Change the persona:** edit `system_prompt` in `app.py`.
 - **Use a different LLM:** swap `ChatMistralAI` for another LangChain chat model (OpenAI, Anthropic, Groq, a local Ollama model, ...).
 - **Tune retrieval:** change chunk size, `FINAL_K` or `VECTOR_WEIGHT` in `src/config.py`, rebuild, then rerun `eval_retrieval.py` to see whether it helped. Add your own questions to `eval/questions.json`.
-- **Keep chats on the hosted demo:** Hugging Face offers paid persistent storage; or point `CHAT_DB_PATH` at a mounted volume when self-hosting with Docker.
+- **Keep chats on the hosted demo:** Render offers paid persistent disks; or point `CHAT_DB_PATH` at a mounted volume when self-hosting with Docker.
 
 ---
 

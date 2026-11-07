@@ -1,0 +1,14 @@
+# Small-server dependencies (Render free tier, 512 MB RAM): no PyTorch, no local reranker.
+# Used by Dockerfile.render together with RETRIEVER=lite. For local development and the
+# full-quality setup, use requirements.txt instead.
+flask>=3.0
+flask-limiter>=3.5
+gunicorn>=22.0
+python-dotenv>=1.0
+pypdf>=4.0
+pillow>=10.0
+fastembed>=0.7
+pinecone>=7,<11
+langchain>=0.3,<0.4
+langchain-core>=0.3,<0.4
+langchain-mistralai>=0.2,<0.3

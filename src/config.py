@@ -55,6 +55,12 @@ MISTRAL_VISION_MODEL = _env("MISTRAL_VISION_MODEL", "pixtral-12b-2409")     # (e
 LLM_TEMPERATURE = 0.2
 
 # ── Retrieval ────────────────────────────────────────────────────────────────
+# "full": local PyTorch models, BM25 keyword search and cross-encoder reranking (best quality,
+#         needs ~2 GB RAM). "lite": ONNX query embedding + Pinecone vector search + Pinecone's
+#         hosted reranker; fits the 512 MB / 0.1 CPU Render free tier (see src/retrieval_lite.py).
+RETRIEVER = _env("RETRIEVER", "full").lower()                                # (env)
+RERANK_MODEL = _env("RERANK_MODEL", "bge-reranker-v2-m3")                   # (env) lite: hosted reranker
+FASTEMBED_CACHE = _env("FASTEMBED_CACHE_PATH", "")                          # (env) lite: ONNX model folder
 CANDIDATES_PER_RETRIEVER = 20   # fetched from each of vector search and BM25
 FINAL_K = 5                     # passages kept after reranking and sent to the LLM
 VECTOR_WEIGHT = 0.6             # vs. BM25 (0.4) when fusing the two result lists
@@ -68,6 +74,10 @@ MENTAL_HEALTH_HELPLINE = _env("MENTAL_HEALTH_HELPLINE", "14416")            # (e
 # If the best reranked passage scores below this, the bot declines to answer instead of
 # guessing. Cross-encoder scores are logits; see the README for how this was set.
 MIN_RELEVANCE_SCORE = float(_env("MIN_RELEVANCE_SCORE", "-1.0"))            # (env)
+# The same idea for the lite retriever: hosted-reranker score (0..1) and, when the reranker
+# isn't available, cosine similarity from vector search. Calibrated like the one above.
+MIN_RERANK_SCORE = float(_env("MIN_RERANK_SCORE", "0.2"))                  # (env)
+MIN_VECTOR_SCORE = float(_env("MIN_VECTOR_SCORE", "0.45"))                  # (env)
 
 # ── Rate limits (Flask-Limiter syntax, per visitor IP) ──────────────────────
 CHAT_RATE_LIMIT = _env("CHAT_RATE_LIMIT", "10 per minute;100 per day")      # (env)

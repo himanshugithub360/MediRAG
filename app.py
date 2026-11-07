@@ -8,7 +8,7 @@ from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
 from src import config, safety, storage
 from src.config import (CHAT_RATE_LIMIT, COLLECTIONS, MAX_HISTORY_MESSAGES, MAX_UPLOAD_MB,
-                        MIN_RELEVANCE_SCORE, MISTRAL_MIN_INTERVAL, UPLOAD_RATE_LIMIT)
+                        MISTRAL_MIN_INTERVAL, UPLOAD_RATE_LIMIT)
 from src.documents import IMAGE_NOTICE, UploadError, process_upload, relevant_upload_context
 from src.languages import language_name, public_list as language_list, resolve_language
 import json
@@ -177,16 +177,39 @@ class Services:
         from langchain.chains.combine_documents import create_stuff_documents_chain
         from langchain_core.output_parsers import StrOutputParser
         from langchain_mistralai import ChatMistralAI
-        from langchain_pinecone import PineconeVectorStore
-        from pinecone import Pinecone
-        from src.helper import download_hugging_face_embeddings, export_chunks_from_pinecone
-        from src.retrieval import HybridRetriever
 
         missing = [k for k in ("PINECONE_API_KEY", "MISTRAL_API_KEY") if not getattr(config, k)]
         if missing:
             raise RuntimeError(f"Missing environment variables: {', '.join(missing)}. "
                                "Add them to your .env file (or as secrets on your hosting platform).")
         os.environ["PINECONE_API_KEY"] = config.PINECONE_API_KEY
+
+        if config.RETRIEVER == "lite":
+            # Small servers: ONNX query embedding + Pinecone search + hosted reranking
+            from src.retrieval_lite import LiteRetriever
+
+            self.retriever = LiteRetriever()
+        else:
+            self.retriever = self._full_retriever()
+
+        llm = ChatMistralAI(model=config.MISTRAL_MODEL, temperature=config.LLM_TEMPERATURE,
+                            api_key=config.MISTRAL_API_KEY)
+        # Reads uploaded photos and scanned documents
+        self.vision_llm = ChatMistralAI(model=config.MISTRAL_VISION_MODEL, temperature=0.1,
+                                        api_key=config.MISTRAL_API_KEY)
+        self.qa_chain = create_stuff_documents_chain(llm, answer_prompt, document_prompt=document_prompt)
+        self.symptom_chain = create_stuff_documents_chain(llm, symptom_prompt, document_prompt=document_prompt)
+        self.contextualize_chain = contextualize_prompt | llm | StrOutputParser()
+        self.translate_chain = translate_prompt | llm | StrOutputParser()
+        app.logger.info("Models loaded (%s retriever).", config.RETRIEVER)
+
+    @staticmethod
+    def _full_retriever():
+        """Local PyTorch models + BM25 keyword search + cross-encoder reranking."""
+        from langchain_pinecone import PineconeVectorStore
+        from pinecone import Pinecone
+        from src.helper import download_hugging_face_embeddings, export_chunks_from_pinecone
+        from src.retrieval import HybridRetriever
 
         # Keyword search needs a local copy of the chunks; rebuild it from Pinecone if missing
         if not os.path.exists(config.CHUNKS_PATH) and config.CHUNKS_FROM_PINECONE:
@@ -201,17 +224,7 @@ class Services:
         store = PineconeVectorStore.from_existing_index(index_name=config.INDEX_NAME, embedding=embeddings,
                                                         namespace=config.NAMESPACE)
         # Vector search + BM25 keyword search, fused and reranked (see src/retrieval.py)
-        self.retriever = HybridRetriever(store)
-
-        llm = ChatMistralAI(model=config.MISTRAL_MODEL, temperature=config.LLM_TEMPERATURE,
-                            api_key=config.MISTRAL_API_KEY)
-        # Reads uploaded photos and scanned documents
-        self.vision_llm = ChatMistralAI(model=config.MISTRAL_VISION_MODEL, temperature=0.1,
-                                        api_key=config.MISTRAL_API_KEY)
-        self.qa_chain = create_stuff_documents_chain(llm, answer_prompt, document_prompt=document_prompt)
-        self.symptom_chain = create_stuff_documents_chain(llm, symptom_prompt, document_prompt=document_prompt)
-        self.contextualize_chain = contextualize_prompt | llm | StrOutputParser()
-        self.translate_chain = translate_prompt | llm | StrOutputParser()
+        return HybridRetriever(store)
 
 
 _services = None
@@ -463,8 +476,7 @@ def answer_events(conversation_id, user_message, language="auto", collections=No
 
         # 5. Don't let the model guess when nothing relevant was found
         best_score = docs[0].metadata.get("relevance_score") if docs else None
-        if not uploads and not symptom and (
-                not docs or (best_score is not None and best_score < MIN_RELEVANCE_SCORE)):
+        if not uploads and not symptom and not svc.retriever.confident(docs):
             app.logger.info("Low relevance (best score %s) for %r; declining to answer", best_score, english)
             yield from canned(safety.low_confidence_response(), kind="low_confidence", notice=check.notice)
             return

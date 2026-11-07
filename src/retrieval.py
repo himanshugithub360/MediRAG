@@ -20,8 +20,8 @@ from langchain_core.documents import BaseDocumentCompressor, Document
 from pydantic import ConfigDict
 from langchain_community.retrievers import BM25Retriever
 
-from src.config import (CANDIDATES_PER_RETRIEVER, CHUNKS_PATH, FINAL_K, RERANKER_MODEL,
-                        VECTOR_WEIGHT)
+from src.config import (CANDIDATES_PER_RETRIEVER, CHUNKS_PATH, FINAL_K, MIN_RELEVANCE_SCORE,
+                        RERANKER_MODEL, VECTOR_WEIGHT)
 from src.helper import load_chunks
 
 log = logging.getLogger(__name__)
@@ -130,6 +130,12 @@ class HybridRetriever:
 
     def invoke(self, query):
         return self.retrieve(query)
+
+    @staticmethod
+    def confident(docs):
+        """Is the best passage a good enough match to answer from?"""
+        best = docs[0].metadata.get("relevance_score") if docs else None
+        return bool(docs) and (best is None or best >= MIN_RELEVANCE_SCORE)
 
 
 def build_retriever(vector_store, chunks_path=CHUNKS_PATH, use_bm25=True, use_reranker=True,

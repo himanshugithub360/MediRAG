@@ -54,6 +54,11 @@ class FakeRetriever:
     def score(self, query, texts):
         return [1.0] * len(texts)
 
+    @staticmethod
+    def confident(docs):
+        from src.retrieval import HybridRetriever
+        return HybridRetriever.confident(docs)
+
 
 class FakeServices:
     def __init__(self):
