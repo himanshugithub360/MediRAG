@@ -4,13 +4,13 @@
 
 <br/>
 
-<a href="https://medirag-k33w.onrender.com"><img src="https://img.shields.io/badge/%E2%96%B6%20%20OPEN%20THE%20LIVE%20DEMO-14d6b0?style=for-the-badge&labelColor=062b30" alt="Open the live demo" height="40"/></a>
+<a href="https://medirag-k33w.onrender.com"><img src="https://img.shields.io/badge/%E2%96%B6%20%20OPEN%20THE%20LIVE%20DEMO-ff2d3b?style=for-the-badge&labelColor=0b0b0c" alt="Open the live demo" height="40"/></a>
 
 <sub>Free hosting: if nobody has visited for 15 minutes, the first load takes about a minute while it wakes up.</sub>
 
 <br/><br/>
 
-[![CI](https://github.com/himanshugithub360/MediRAG/actions/workflows/ci.yml/badge.svg)](https://github.com/himanshugithub360/MediRAG/actions/workflows/ci.yml) ![Python](https://img.shields.io/badge/python-3.12-0a1626?logo=python&logoColor=5eead4&labelColor=0a1626) ![Flask](https://img.shields.io/badge/flask-3-0a1626?logo=flask&logoColor=5eead4&labelColor=0a1626) ![LangChain](https://img.shields.io/badge/langchain-0.3-0a1626?logo=langchain&logoColor=5eead4&labelColor=0a1626) ![Pinecone](https://img.shields.io/badge/pinecone-vectors-0a1626?labelColor=0a1626) ![Mistral](https://img.shields.io/badge/mistral-LLM_%2B_vision-0a1626?labelColor=0a1626)
+[![CI](https://github.com/himanshugithub360/MediRAG/actions/workflows/ci.yml/badge.svg)](https://github.com/himanshugithub360/MediRAG/actions/workflows/ci.yml) ![Python](https://img.shields.io/badge/python-3.12-0b0b0c?logo=python&logoColor=f3eee4&labelColor=0b0b0c) ![Flask](https://img.shields.io/badge/flask-3-0b0b0c?logo=flask&logoColor=f3eee4&labelColor=0b0b0c) ![LangChain](https://img.shields.io/badge/langchain-0.3-0b0b0c?logo=langchain&logoColor=f3eee4&labelColor=0b0b0c) ![Pinecone](https://img.shields.io/badge/pinecone-vectors-0b0b0c?labelColor=0b0b0c) ![Mistral](https://img.shields.io/badge/mistral-LLM_%2B_vision-0b0b0c?labelColor=0b0b0c)
 
 </div>
 
@@ -25,7 +25,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/vitals.svg" alt="Vital signs: 13,828 passages, Hit@5 100% and MRR 0.87, 10 languages, 101 tests, ~240 MB, ₹0 hosting" width="100%"/>
+  <img src="docs/assets/vitals.svg" alt="Vital signs: 13,828 passages, Hit@5 100% and MRR 0.87, 10 languages, 103 tests, ~240 MB, ₹0 hosting" width="100%"/>
 </p>
 
 <div align="center">
@@ -55,6 +55,11 @@ General chatbots answer health questions **confidently but without sources**. Th
 
 ## 🔬 Examination
 
+<p align="center">
+  <img src="docs/assets/landing.webp" alt="The landing page: a beating red cross, an ECG line and the headline Trust the source" width="100%"/>
+  <br/><sub>🏠 The landing page: scroll-driven animation, a beating cross and a live ECG line</sub>
+</p>
+
 <table>
 <tr>
 <td width="50%"><img src="docs/assets/answer-sources.webp" alt="Answer about metformin side effects with its sources"/></td>
@@ -83,6 +88,11 @@ General chatbots answer health questions **confidently but without sources**. Th
 </table>
 
 <p align="center">
+  <img src="docs/assets/composer.webp" alt="The message box: a text area with Attach and Voice buttons, keyboard hints and a red send button" width="82%"/>
+  <br/><sub>⌨️ The message box: attach a report, speak, or type. A red light travels around the edge while you write.</sub>
+</p>
+
+<p align="center">
   <img src="docs/assets/mobile-welcome.webp" alt="Mobile welcome screen" width="26%"/>&nbsp;&nbsp;
   <img src="docs/assets/mobile-hindi.webp" alt="Mobile Hindi answer" width="26%"/>&nbsp;&nbsp;
   <img src="docs/assets/mobile-sidebar.webp" alt="Mobile chat history" width="26%"/>
@@ -100,8 +110,8 @@ General chatbots answer health questions **confidently but without sources**. Th
 | **Safety** | Emergency, crisis and dosage rules (English, Hindi, Hinglish) · "won't guess" threshold · no doses, prescriptions or diagnoses · per-visitor rate limits, with emergencies never blocked |
 | **India** | 10 languages, detected automatically from the script · Indian helplines (112, 108, Tele-MANAS 14416) · symptom checker that favours common local causes |
 | **Your files** | Text and scanned PDFs, photos (Pixtral vision) · range checking done in code · image disclaimers · files deleted along with their chat |
-| **App** | Streaming · Markdown · SQLite history · search, rename, delete · 👍/👎 review page · copy · dark/light theme · mobile · voice in and out |
-| **Engineering** | 101 tests · GitHub Actions · Docker (full and lite) · waitress/gunicorn · free Render deploy · retrieval evaluation script · all settings in one file |
+| **App** | Animated landing page · Ink & Crimson theme · command-bar message box · Streaming · Markdown · SQLite history · search, rename, delete · 👍/👎 review page · copy · dark/light theme · mobile · voice in and out |
+| **Engineering** | 103 tests · GitHub Actions · Docker (full and lite) · waitress/gunicorn · free Render deploy · retrieval evaluation script · all settings in one file |
 
 </details>
 
@@ -110,7 +120,7 @@ General chatbots answer health questions **confidently but without sources**. Th
 ## 🧠 Diagnosis: how it works
 
 ```mermaid
-%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0e1f35','primaryTextColor':'#e6f0f6','primaryBorderColor':'#14d6b0','lineColor':'#14d6b0','fontFamily':'Segoe UI, sans-serif'}}}%%
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#161618','primaryTextColor':'#f3eee4','primaryBorderColor':'#ff2d3b','lineColor':'#ff2d3b','fontFamily':'Segoe UI, sans-serif'}}}%%
 flowchart LR
     Q([🗣️ Question<br/>any language]) --> S{🛡️ Safety<br/>rules}
     S -- emergency · crisis · dosage --> R1([🚨 Instant reply<br/>112 · 108 · 14416])
@@ -123,8 +133,8 @@ flowchart LR
     C -- no --> R2([🙅 I'd rather<br/>not guess])
     C -- yes --> L[🤖 Mistral]
     L --> A([💬 Answer in your<br/>language + sources])
-    classDef alert fill:#3a1418,stroke:#ff6159,color:#ffd0cd
-    classDef good fill:#08322c,stroke:#14d6b0,color:#d5fff6
+    classDef alert fill:#4a0d12,stroke:#ff2d3b,color:#ffd9dc
+    classDef good fill:#f3eee4,stroke:#f3eee4,color:#0b0b0c
     class R1 alert
     class A good
 ```
@@ -195,7 +205,7 @@ python store_index.py
 python app.py
 ```
 
-→ **<http://localhost:8080>** opens by itself. For a production server, use `python serve.py`.
+→ **<http://localhost:8080>** opens by itself (the landing page; the chat is at **/app**). For a production server, use `python serve.py`.
 
 <details>
 <summary><b>Dosage notes</b>: browser choice, ports, lite mode, other PDFs, licences</summary>
@@ -235,7 +245,7 @@ Measured with `python eval_retrieval.py` on 16 test questions. It makes no LLM c
 
 ### Tests
 
-**101 tests, about 5 seconds, with no API keys or network** (the AI is faked in `tests/conftest.py`). [GitHub Actions](.github/workflows/ci.yml) runs them and builds both Docker images on every push.
+**103 tests, about 5 seconds, with no API keys or network** (the AI is faked in `tests/conftest.py`). [GitHub Actions](.github/workflows/ci.yml) runs them and builds both Docker images on every push.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -246,7 +256,7 @@ python -m pytest -q
 
 | Suite | | Covers |
 |---|:-:|---|
-| `test_app.py` | 29 | `/chat`, streaming, greetings, follow-ups, Hindi, filters, safety paths, **error handling** (LLM down, 429 retry, rate limit, bad input), symptom checker, uploads, **lab range checks**, privacy, feedback, health |
+| `test_app.py` | 31 | `/chat`, streaming, greetings, follow-ups, Hindi, filters, safety paths, **error handling** (LLM down, 429 retry, rate limit, bad input), symptom checker, uploads, **lab range checks**, privacy, feedback, health |
 | `test_safety.py` | 58 | Emergencies, crises, dosage, notices, safe questions, Hindi and Hinglish |
 | `test_storage.py` · `test_retrieval_lite.py` · `test_languages.py` | 6 · 5 · 3 | Saved chats · hosted rerank and its fallback · script detection |
 
@@ -339,6 +349,7 @@ Then open <http://localhost:7860>. `GET /healthz` returns `ok` when it's ready; 
 | `GET` · `PATCH` · `DELETE /api/conversations[/<id>]` | List, read, rename, delete |
 | `POST /api/messages/<id>/feedback` | `{"value": 1 \| -1 \| null}` |
 | `GET /api/feedback/summary` | 👍/👎 totals + recent 👎 (localhost only) |
+| `GET /` · `GET /app` | The landing page · the chat app (old `/?c=<id>` links redirect to `/app`) |
 | `GET /healthz` | `ok` once the models are loaded |
 
 ```bash
@@ -393,9 +404,9 @@ MediRAG/
 │   ├── languages.py       # 10 languages
 │   ├── storage.py         # SQLite
 │   └── helper.py · launcher.py
-├── templates/chat.html    # the whole UI
+├── templates/             # landing.html (animated home page) · chat.html (the app)
 ├── static/ · docs/assets/ # icons, vendored JS · README images
-├── tests/                 # 101 tests
+├── tests/                 # 103 tests
 └── Dockerfile · Dockerfile.render · render.yaml · .github/workflows/ci.yml
 ```
 
@@ -427,7 +438,7 @@ MediRAG/
 
 <div align="center">
 
-<img src="https://img.shields.io/badge/attending_physician-Himanshu_Kumar-14d6b0?style=flat-square&labelColor=0a1626" alt="Attending physician: Himanshu Kumar"/>
+<img src="https://img.shields.io/badge/attending_physician-Himanshu_Kumar-ff2d3b?style=flat-square&labelColor=0b0b0c" alt="Attending physician: Himanshu Kumar"/>
 
 **[github.com/himanshugithub360](https://github.com/himanshugithub360)**
 
