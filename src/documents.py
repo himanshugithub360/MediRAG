@@ -8,6 +8,7 @@
 import base64
 import io
 import os
+import re
 import uuid
 
 from pypdf import PdfReader
@@ -119,6 +120,35 @@ def process_upload(filename, data, describe_image):
     raise UploadError("Please upload a PDF or an image (PNG, JPG or WebP).")
 
 
+# "Haemoglobin  11.2  g/dL  13.0 - 17.0"  /  "HbA1c 7.1 % < 5.7"  /  "Vitamin D 32 ng/mL >30"
+_NUM = r"\d+(?:\.\d+)?"
+_RANGE_ROW = re.compile(
+    rf"^(?P<name>[A-Za-z][\w ().,/%+-]*?)\s*[:]?\s+(?P<value>{_NUM})\s+(?P<unit>[^\d\s<>]*)\s*"
+    rf"(?:(?P<lo>{_NUM})\s*(?:-|–|to)\s*(?P<hi>{_NUM})|(?P<op><=?|>=?)\s*(?P<lim>{_NUM}))")
+
+
+def check_ranges(text):
+    """Add the app's own range check after each "test value unit range" line, e.g.
+    "Creatinine 0.9 mg/dL 0.7 - 1.3  [app check: within range]". Small LLMs often get these
+    number comparisons wrong, so the answer is computed here and given to the model."""
+    out = []
+    for line in text.splitlines():
+        m = _RANGE_ROW.search(line.strip())
+        verdict = None
+        if m:
+            value = float(m.group("value"))
+            if m.group("lo") is not None:
+                lo, hi = float(m.group("lo")), float(m.group("hi"))
+                if lo < hi:
+                    verdict = "LOW" if value < lo else "HIGH" if value > hi else "within range"
+            else:
+                lim, op = float(m.group("lim")), m.group("op")
+                ok = {"<": value < lim, "<=": value <= lim, ">": value > lim, ">=": value >= lim}[op]
+                verdict = "within range" if ok else ("HIGH" if op.startswith("<") else "LOW")
+        out.append(f"{line}  [app check: {verdict}]" if verdict else line)
+    return "\n".join(out)
+
+
 def split_text(text, size=1000, overlap=150):
     parts, start = [], 0
     while start < len(text):
@@ -136,10 +166,10 @@ def relevant_upload_context(attachments, query, score, max_chars=7000):
     blocks = []
     if total <= max_chars:
         for a in attachments:
-            blocks.append(f'--- File: {a["filename"]} ---\n{a["text"]}')
+            blocks.append(f'--- File: {a["filename"]} ---\n{check_ranges(a["text"])}')
         return "\n\n".join(blocks)
 
-    pieces = [(a["filename"], p) for a in attachments for p in split_text(a["text"])]
+    pieces = [(a["filename"], p) for a in attachments for p in split_text(check_ranges(a["text"]))]
     scores = score(query, [p for _, p in pieces])
     chosen, used = [], 0
     for (fname, piece), _ in sorted(zip(pieces, scores), key=lambda x: x[1], reverse=True):

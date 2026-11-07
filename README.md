@@ -1,178 +1,153 @@
-# 🩺 MediRAG — Dr. Insight, an AI Medical Chatbot
+<div align="center">
 
-Dr. Insight is a medical question-answering chatbot built on **Retrieval-Augmented Generation (RAG)**. It answers health questions using passages retrieved from trusted medical sources (the *Gale Encyclopedia of Medicine*, OpenStax *Pharmacology for Nurses*, **MedlinePlus** from the U.S. National Library of Medicine, and **WHO fact sheets**), rather than relying only on what the language model remembers. Every answer lists the sources it was based on.
+<img src="docs/assets/banner.svg" alt="MediRAG · Dr. Insight: evidence-based medical answers, with every source shown" width="100%"/>
 
-You can also **upload a lab report, prescription or photo** and ask about it, chat in **Hindi and 9 other Indian languages**, **speak** your question and **hear** the answer, or run a guided **symptom checker**.
+<br/>
 
-> ⚠️ **Disclaimer:** This project is for learning and demonstration only. It is **not** a substitute for professional medical advice, diagnosis, or treatment. Always consult a qualified doctor.
+<a href="https://medirag-k33w.onrender.com"><img src="https://img.shields.io/badge/%E2%96%B6%20%20OPEN%20THE%20LIVE%20DEMO-14d6b0?style=for-the-badge&labelColor=062b30" alt="Open the live demo" height="40"/></a>
 
----
+<sub>Free hosting: if nobody has visited for 15 minutes, the first load takes about a minute while it wakes up.</sub>
 
-## Table of contents
+<br/><br/>
 
-1. [Features](#features)
-2. [How it works](#how-it-works)
-3. [Tech stack](#tech-stack)
-4. [Project structure](#project-structure)
-5. [Prerequisites](#prerequisites)
-6. [Setup (step by step)](#setup-step-by-step)
-7. [Running the app](#running-the-app)
-8. [Using the chatbot](#using-the-chatbot)
-9. [Safety features](#safety-features)
-10. [Configuration reference](#configuration-reference)
-11. [API reference](#api-reference)
-12. [Running the tests](#running-the-tests)
-13. [Docker](#docker)
-14. [Free deployment (Render)](#free-deployment-render)
-15. [Troubleshooting](#troubleshooting)
-16. [Customisation ideas](#customisation-ideas)
+[![CI](https://github.com/himanshugithub360/MediRAG/actions/workflows/ci.yml/badge.svg)](https://github.com/himanshugithub360/MediRAG/actions/workflows/ci.yml) ![Python](https://img.shields.io/badge/python-3.12-0a1626?logo=python&logoColor=5eead4&labelColor=0a1626) ![Flask](https://img.shields.io/badge/flask-3-0a1626?logo=flask&logoColor=5eead4&labelColor=0a1626) ![LangChain](https://img.shields.io/badge/langchain-0.3-0a1626?logo=langchain&logoColor=5eead4&labelColor=0a1626) ![Pinecone](https://img.shields.io/badge/pinecone-vectors-0a1626?labelColor=0a1626) ![Mistral](https://img.shields.io/badge/mistral-LLM_%2B_vision-0a1626?labelColor=0a1626)
 
----
+</div>
 
-## Features
+> [!CAUTION]
+> **Educational project. Not a doctor.** Dr. Insight gives general information only: no diagnoses, no prescriptions.
+> In an emergency in India, call **112** (ambulance **108**, mental health **14416**).
 
-- 📎 **Upload your own reports**: PDF lab reports and prescriptions (including scanned ones) or photos; ask *"which values are abnormal?"*
-- 🇮🇳 **Hindi and other Indian languages**: ask in हिन्दी, বাংলা, मराठी, தமிழ், తెలుగు, ગુજરાતી, ಕನ್ನಡ, മലയാളം or ਪੰਜਾਬੀ; the bot searches in English and answers in your language
-- 🎤 **Voice input and output**: speak your question and hear the answer read aloud (free, uses the browser's built-in speech)
-- 🩺 **Symptom checker**: a guided form (symptoms, age, duration, severity, warning signs) that suggests possible causes, urgency and which doctor to see
-- 📷 **Medical image questions**: a vision model describes a photographed rash or reads a photographed report, with strong disclaimers
-- 🗂️ **Filter by source**: search all sources, or only the encyclopedia, pharmacology book, MedlinePlus or WHO
-- 🖥️ **Modern dashboard**: sidebar of saved chats, welcome screen with suggested questions, works on desktop and phone
-- ⚡ **Streaming answers**: text appears word by word, with a **Stop** button
-- 📝 **Markdown rendering**: headings, bullet lists, **bold** and tables display properly
-- 💾 **Saved chat history** (SQLite): reopen, search, rename or delete past conversations; they survive restarts
-- 📋 **Copy** any answer, and rate it **👍 / 👎** to flag bad answers for review
-- 🌗 **Dark / light theme** toggle (follows your system setting until you choose)
-- 📚 Answers grounded in **13,800+ passages**: ~1,900 pages of medical books, 1,015 MedlinePlus health topics and 243 WHO fact sheets
-- 📖 **Sources shown under every answer** (book + page, or a link to the MedlinePlus / WHO page)
-- 🔎 **Hybrid search**: meaning-based vector search (Pinecone) + keyword search (BM25), so exact drug and disease names are always found
-- 🎯 **Reranking**: a cross-encoder model picks the 5 best passages out of ~40 candidates
-- 🚨 **Emergency detection**: chest pain, stroke signs, overdose and similar emergencies get emergency numbers (112 / 108) immediately, without waiting for the AI
-- 💙 **Crisis support**: messages about suicide or self-harm get the Tele-MANAS helpline (14416) right away
-- 💊 **No personal dosing or prescribing**: requests like *"how much paracetamol should I take?"* are politely declined
-- 🙅 **Won't guess**: if the books have nothing relevant, the bot says so instead of making something up
-- ⏳ **Rate limiting**: protects the app and keeps Mistral's free-tier limit from being hit
-- 🐳 **Docker + free public deployment** on Render (a lightweight mode fits its 512 MB free tier), with **GitHub Actions** running the tests on every push
-- 📏 **Built-in retrieval evaluation** (`eval_retrieval.py`) to measure changes with numbers
-- 🧠 Conversation memory: follow-ups like *"what are its treatments?"* are understood in context
-- ⚡ Instant replies for greetings like "hi", "thanks", "bye" (no API call needed)
-- 🩺 An empathetic "Dr. Insight" persona that recommends seeing a real doctor
-- 🔧 LLM model selectable through an environment variable
+<br/>
 
-## How it works
+<p align="center">
+  <img src="docs/assets/hero.webp" alt="Dr. Insight explaining a lab report on desktop, and answering in Hindi on a phone" width="100%"/>
+</p>
 
-```
- ── ingestion: store_index.py (run once, and again whenever Data/ changes) ─────────────────
- fetch_sources.py ─► Data/web/*.jsonl (MedlinePlus topics, WHO fact sheets)
- Data/*.pdf + Data/web/ ─► clean text ─► 1000-char chunks, tagged with source + collection ─┬─► MiniLM embeddings ─► Pinecone (medical_v2)
-                                                                                            └─► artifacts/chunks.jsonl (keyword search)
+<p align="center">
+  <img src="docs/assets/vitals.svg" alt="Vital signs: 13,828 passages, Hit@5 100% and MRR 0.87, 10 languages, 101 tests, ~240 MB, ₹0 hosting" width="100%"/>
+</p>
 
- ── every chat message: app.py ──────────────────────────────────────────────────────────────
- question (any language) ─► safety keyword checks (English + Hindi) ─► emergency / crisis / dosage? → fixed reply
-          ─► LLM: faithful English translation (re-checked for safety) + standalone English search question
-          ─► vector search: top 20 ┐   (optionally limited to one collection)
-          ─► BM25 keyword search: top 20 ┴─► fuse (Reciprocal Rank Fusion) ─► cross-encoder rerank ─► best 5 passages
-          ─► + relevant parts of the user's uploaded files (if any)
-          ─► Mistral LLM: answer written in the user's language, streamed word by word, with sources
+<div align="center">
 
- upload ─► PDF text (pypdf) or, for photos / scanned pages, the Pixtral vision model's transcription ─► saved with the chat
-```
+**[🩺 Complaint](#-chief-complaint)** &nbsp;·&nbsp; **[🔬 Examination](#-examination)** &nbsp;·&nbsp; **[🧠 Diagnosis](#-diagnosis-how-it-works)** &nbsp;·&nbsp; **[💊 Prescription](#-prescription-run-it-yourself)** &nbsp;·&nbsp; **[🧪 Lab results](#-lab-results)** &nbsp;·&nbsp; **[⚠️ Contraindications](#%EF%B8%8F-contraindications)** &nbsp;·&nbsp; **[🚑 Discharge](#-discharge-deploy-for-free)** &nbsp;·&nbsp; **[📎 Appendix](#-appendix)**
 
-1. **Ingestion:** `fetch_sources.py` downloads MedlinePlus and WHO content into `Data/web/`. `store_index.py` reads that plus every PDF in `Data/`, removes page footers and line-break hyphenation, and splits the text into 1000-character chunks with 150 characters of overlap. Each chunk keeps its source, page number or web link, and a *collection* tag (`encyclopedia`, `pharmacology`, `medlineplus`, `who`) used by the source filter. Chunks are embedded with `all-MiniLM-L6-v2` (384 dimensions) and uploaded to the Pinecone index `medichatbot`, namespace `medical_v2`. A local copy is saved to `artifacts/chunks.jsonl` for keyword search.
-2. **Retrieval:** for each question, `src/retrieval.py` runs two searches. **Vector search** finds passages with the same *meaning*; **BM25** finds passages containing the same *words*, which matters for names like "metformin" that embeddings can blur. The two result lists are merged, then a **cross-encoder** (`ms-marco-MiniLM-L-6-v2`) reads the question together with each candidate and keeps the 5 that best answer it.
-3. **Answering:** `app.py` sends those 5 passages (each labelled with its book and page), the recent conversation and the question to a Mistral chat model. The answer is returned together with its sources.
-
-## Tech stack
-
-| Layer            | Technology                                                   |
-|------------------|--------------------------------------------------------------|
-| Web server       | Flask                                                        |
-| RAG framework    | LangChain (0.3.x)                                            |
-| Embeddings       | `sentence-transformers/all-MiniLM-L6-v2` (runs locally, CPU) |
-| Keyword search   | BM25 (`rank_bm25`), in memory                                |
-| Reranker         | `cross-encoder/ms-marco-MiniLM-L-6-v2` (runs locally, CPU)   |
-| Vector database  | Pinecone (serverless, AWS `us-east-1`)                       |
-| LLM              | Mistral AI (default: `open-mistral-nemo`)                    |
-| Vision model     | Mistral Pixtral (`pixtral-12b-2409`), for photos and scans   |
-| Voice            | Browser Web Speech API (speech recognition + synthesis)     |
-| Images           | Pillow (checks and shrinks uploaded photos)                  |
-| PDF parsing      | pypdf via LangChain `PyPDFLoader`                            |
-| Chat history     | SQLite (`instance/medirag.db`)                               |
-| Safety & limits  | Keyword rules (`src/safety.py`), Flask-Limiter               |
-| Frontend         | Plain HTML/CSS/JS, marked (Markdown), DOMPurify (sanitising) |
-
-## Project structure
-
-```
-AI Medical-chatbot/
-├── app.py               # Flask web app: RAG pipeline, streaming chat, uploads, conversation + feedback APIs
-├── serve.py             # Production server (waitress) for Windows/macOS/Linux
-├── wsgi.py              # Entry point for gunicorn (used in Docker)
-├── Dockerfile           # Production image (gunicorn, CPU-only PyTorch, models baked in)
-├── .dockerignore        # Keeps .env, Data/, chat history etc. out of the image
-├── .github/workflows/
-│   └── ci.yml           # Tests + Docker build checks on every push (Render deploys after they pass)
-├── Dockerfile.render    # Lightweight image for Render's free tier (no PyTorch, ~250 MB RAM)
-├── render.yaml          # Render Blueprint: free web service, auto-deploy, health check
-├── requirements-lite.txt # Dependencies of the lightweight image
-├── fetch_sources.py     # Downloads MedlinePlus topics + WHO fact sheets into Data/web/
-├── store_index.py       # Builds the knowledge base: PDFs + web content → chunks → Pinecone + local copy
-├── eval_retrieval.py    # Measures retrieval quality (Hit@5, MRR) for different setups
-├── eval/
-│   └── questions.json   # Test questions + keywords used by eval_retrieval.py
-├── src/
-│   ├── config.py        # ALL settings in one place (reads .env)
-│   ├── helper.py        # PDF loading + cleaning, chunking, embeddings, chunk file I/O
-│   ├── retrieval.py     # Full mode: hybrid search (vector + BM25) and cross-encoder reranking
-│   ├── retrieval_lite.py # Lite mode: ONNX embedding + Pinecone search + hosted reranker
-│   ├── safety.py        # Emergency, crisis and dosage detection + their responses
-│   ├── storage.py       # SQLite: saved conversations, messages, uploads and 👍/👎 feedback
-│   ├── documents.py     # Reading uploaded PDFs/photos (pypdf + vision model)
-│   ├── languages.py     # Supported languages + script-based language detection
-│   ├── launcher.py      # Opens the chat in the default browser, Chrome or Edge
-├── tests/
-│   ├── conftest.py      # Fake AI services so tests need no keys or network
-│   ├── test_app.py      # 27 API tests: /chat, streaming, greetings, errors, uploads, ...
-│   ├── test_retrieval_lite.py # 5 tests for lite mode (rerank fallback, thresholds, filters)
-│   ├── test_safety.py   # 58 tests for the safety rules (English, Hindi, Hinglish)
-│   ├── test_storage.py  # 6 tests for saved chats and feedback
-│   └── test_languages.py # 3 tests for language detection
-├── templates/
-│   └── chat.html        # Dashboard UI (HTML, CSS and JavaScript in one file)
-├── static/              # Favicons, web manifest
-│   └── vendor/          # marked (Markdown) + DOMPurify (HTML sanitising), bundled for offline use
-├── instance/            # medirag.db, uploads/ (users' files) + secret_key; created on first run (not committed)
-├── Data/                # Source PDFs + web/ (downloaded content); not committed
-├── artifacts/           # chunks.jsonl, generated by store_index.py (not committed)
-├── research/
-│   └── trials.ipynb     # Notebook used to experiment while building the project
-├── requirements.txt     # Python dependencies
-├── requirements-dev.txt # + pytest, for running the tests
-├── setup.py             # Makes `src` installable as a package (pip install -e .)
-├── template.py          # Scaffolding script that created the initial folder layout
-└── .env                 # Your API keys (NOT committed — you create this)
-```
-
-## Prerequisites
-
-| Requirement | Notes |
-|-------------|-------|
-| **Python 3.10 – 3.12** | 3.12 is recommended and tested. Python 3.13/3.14 may not have wheels for every dependency yet. |
-| **Git** | To clone the repository. |
-| **Pinecone account** | Free tier works. Get an API key at <https://app.pinecone.io>. |
-| **Mistral AI account** | Free tier works. Get an API key at <https://console.mistral.ai/api-keys>. |
-| ~2 GB disk space | For PyTorch (CPU) and the embedding model. |
-| Internet connection | To call Pinecone and Mistral, and download the embedding model on first run. |
-
-No GPU is needed; everything runs on CPU.
+</div>
 
 ---
 
-## Setup (step by step)
+## 🩺 Chief complaint
 
-The commands below are for **Windows** (Git Bash or PowerShell). macOS/Linux differences are noted where relevant.
+> *"I searched my symptoms online, and now I'm convinced it's something rare."*
 
-### 1. Clone the repository
+General chatbots answer health questions **confidently but without sources**. They guess when they don't know, and they rarely notice when someone is describing an **emergency**. Most of them only work in English.
+
+**Dr. Insight** takes a different approach:
+
+| | |
+|:--|:--|
+| 📚 **It reads before it answers** | Every reply is built from passages it retrieved from the *Gale Encyclopedia of Medicine*, OpenStax *Pharmacology*, **MedlinePlus** (U.S. NLM) and **WHO fact sheets**, and the sources are listed under the answer. |
+| 🙅 **It says "I don't know"** | If nothing relevant is found, it declines instead of inventing an answer. |
+| 🚨 **It knows when to stop talking** | *"My father's face is drooping"* gets **112 / 108 and first-aid steps instantly**, not an essay. |
+| 🇮🇳 **It speaks your language** | Ask in Hindi or 8 other Indian languages, by typing or by voice. |
+
+---
+
+## 🔬 Examination
+
+<table>
+<tr>
+<td width="50%"><img src="docs/assets/answer-sources.webp" alt="Answer about metformin side effects with its sources"/></td>
+<td width="50%"><img src="docs/assets/report.webp" alt="Explaining an uploaded lab report"/></td>
+</tr>
+<tr>
+<td><b>📖 Sourced answers</b><br/><sub>Streamed word by word, in Markdown. Every answer lists its book pages or MedlinePlus/WHO links.</sub></td>
+<td><b>📎 Your lab report, explained</b><br/><sub>Upload a PDF or photo. Values are <b>checked against their reference ranges in code</b>, then explained in plain words.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/emergency.webp" alt="Emergency card with 112 and 108"/></td>
+<td><img src="docs/assets/symptom-result.webp" alt="Symptom checker result"/></td>
+</tr>
+<tr>
+<td><b>🚨 Emergency detection</b><br/><sub>Safety rules run <b>before</b> the AI, in English, Hindi and Hinglish. Instant, and works even if the AI is down.</sub></td>
+<td><b>🩺 Symptom checker</b><br/><sub>Age, duration, severity and warning signs → likely causes, <b>how urgent it is</b> and <b>which doctor to see</b>.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/assets/hindi.webp" alt="Answer in Hindi"/></td>
+<td><img src="docs/assets/answer-light.webp" alt="Light theme"/></td>
+</tr>
+<tr>
+<td><b>🇮🇳 10 languages + 🎤 voice</b><br/><sub>हिन्दी · বাংলা · मराठी · தமிழ் · తెలుగు · ગુજરાતી · ಕನ್ನಡ · മലയാളം · ਪੰਜਾਬੀ. Speak your question, hear the answer.</sub></td>
+<td><b>🌗 A real app</b><br/><sub>Saved chat history, search, rename, 👍/👎 feedback, copy, Stop button, dark and light themes.</sub></td>
+</tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/mobile-welcome.webp" alt="Mobile welcome screen" width="26%"/>&nbsp;&nbsp;
+  <img src="docs/assets/mobile-hindi.webp" alt="Mobile Hindi answer" width="26%"/>&nbsp;&nbsp;
+  <img src="docs/assets/mobile-sidebar.webp" alt="Mobile chat history" width="26%"/>
+  <br/><sub>📱 Fully responsive: the same app on a phone</sub>
+</p>
+
+<details>
+<summary><b>Everything it can do</b> (full list)</summary>
+
+<br/>
+
+| Area | Features |
+|---|---|
+| **Answers** | RAG over 13,828 passages · hybrid vector + BM25 search · cross-encoder reranking · sources with page numbers or links · filter by source · follow-up questions understood in context · instant replies to greetings |
+| **Safety** | Emergency, crisis and dosage rules (English, Hindi, Hinglish) · "won't guess" threshold · no doses, prescriptions or diagnoses · per-visitor rate limits, with emergencies never blocked |
+| **India** | 10 languages, detected automatically from the script · Indian helplines (112, 108, Tele-MANAS 14416) · symptom checker that favours common local causes |
+| **Your files** | Text and scanned PDFs, photos (Pixtral vision) · range checking done in code · image disclaimers · files deleted along with their chat |
+| **App** | Streaming · Markdown · SQLite history · search, rename, delete · 👍/👎 review page · copy · dark/light theme · mobile · voice in and out |
+| **Engineering** | 101 tests · GitHub Actions · Docker (full and lite) · waitress/gunicorn · free Render deploy · retrieval evaluation script · all settings in one file |
+
+</details>
+
+---
+
+## 🧠 Diagnosis: how it works
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#0e1f35','primaryTextColor':'#e6f0f6','primaryBorderColor':'#14d6b0','lineColor':'#14d6b0','fontFamily':'Segoe UI, sans-serif'}}}%%
+flowchart LR
+    Q([🗣️ Question<br/>any language]) --> S{🛡️ Safety<br/>rules}
+    S -- emergency · crisis · dosage --> R1([🚨 Instant reply<br/>112 · 108 · 14416])
+    S -- safe --> T[🌐 Translate +<br/>rewrite follow-ups]
+    T --> V[(Pinecone<br/>vectors)]
+    T --> B[BM25<br/>keywords]
+    V & B --> F[Fuse → rerank<br/>top 5 passages]
+    U[(📎 Your<br/>reports)] --> L
+    F --> C{Relevant<br/>enough?}
+    C -- no --> R2([🙅 I'd rather<br/>not guess])
+    C -- yes --> L[🤖 Mistral]
+    L --> A([💬 Answer in your<br/>language + sources])
+    classDef alert fill:#3a1418,stroke:#ff6159,color:#ffd0cd
+    classDef good fill:#08322c,stroke:#14d6b0,color:#d5fff6
+    class R1 alert
+    class A good
+```
+
+| | Stage | In one line |
+|:-:|---|---|
+| ① | **Ingest** · `fetch_sources.py`, `store_index.py` | Books + MedlinePlus + WHO → cleaned 1000-character chunks → `all-MiniLM-L6-v2` vectors in Pinecone, plus a local keyword index |
+| ② | **Guard** · `src/safety.py` | Emergency, crisis and dosage rules run on the original text **and** on a faithful English translation |
+| ③ | **Retrieve** · `src/retrieval.py` | Vector search (meaning) + BM25 (exact drug names) → fused → cross-encoder picks the best 5 |
+| ④ | **Answer** · `app.py` | Mistral writes from those passages and your uploads, in your language, streamed, with sources |
+
+**Stack:** Flask · LangChain · Pinecone · Mistral + Pixtral · sentence-transformers · ONNX Runtime · SQLite · vanilla JS · Web Speech API · Docker · GitHub Actions · Render
+
+---
+
+## 💊 Prescription: run it yourself
+
+```text
+℞  Dr. Insight, local setup                          Refills: unlimited · Cost: ₹0
+   You need: Python 3.12 · a free Pinecone key · a free Mistral key · ~2 GB of disk
+```
+
+**℞ 1 · Install**
 
 ```bash
 git clone https://github.com/himanshugithub360/MediRAG.git
@@ -180,410 +155,87 @@ git clone https://github.com/himanshugithub360/MediRAG.git
 ```bash
 cd MediRAG
 ```
-
-### 2. Create a virtual environment
-
-**Windows:**
 ```bash
 py -3.12 -m venv .venv
 ```
-
-**macOS / Linux:**
 ```bash
-python3.12 -m venv .venv
-```
-
-### 3. Activate it
-
-**Windows PowerShell:**
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-**Windows Git Bash:**
-```bash
-source .venv/Scripts/activate
-```
-
-**macOS / Linux:**
-```bash
-source .venv/bin/activate
-```
-
-Your prompt should now start with `(.venv)`. Activate it every time you open a new terminal to work on the project.
-
-> If PowerShell blocks the activation script, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, or simply call `.venv\Scripts\python.exe` directly instead of activating.
-
-### 4. Install dependencies
-
-First install the **CPU-only** build of PyTorch (much smaller than the default GPU build):
-
-```bash
-python -m pip install --upgrade pip
+.venv\Scripts\activate
 ```
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
-
-Then install everything else (this also installs the local `src` package via `-e .`):
-
 ```bash
 pip install -r requirements.txt
 ```
 
-### 5. Create the `.env` file
+<sub>macOS/Linux: `python3.12 -m venv .venv` and `source .venv/bin/activate`.</sub>
 
-Create a file called `.env` in the project root (same folder as `app.py`) with:
+**℞ 2 · Add your keys**: create `.env` in the project folder ([Pinecone](https://app.pinecone.io) · [Mistral](https://console.mistral.ai/api-keys), both free):
 
 ```env
-PINECONE_API_KEY=your-pinecone-api-key
-MISTRAL_API_KEY=your-mistral-api-key
+PINECONE_API_KEY=your-pinecone-key
+MISTRAL_API_KEY=your-mistral-key
 FLASK_SECRET_KEY=any-long-random-string
-
-# Optional
-# MISTRAL_MODEL=open-mistral-nemo
-# PORT=8080
 ```
 
-- `FLASK_SECRET_KEY` signs the browser session cookie that links your browser to its saved chats. If it's not set, a random key is generated once and saved to `instance/secret_key`. Any random string works; you can generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
-- `.env` is listed in `.gitignore`. **Never commit your API keys.**
-
-### 6. Add the source PDFs
-
-The PDFs live in `Data/`, which is **not** committed to Git (the files are large and the encyclopedia is copyrighted). Put these files in `Data/`:
-
-| File name in `Data/` | Book | Where to get it |
-|----------------------|------|-----------------|
-| `Gale Encyclopedia of Medicine. Vol. 1. 2nd ed.pdf` | Gale Encyclopedia of Medicine, Vol. 1 (2nd ed.) | Your own copy (copyrighted) |
-| `OpenStax Pharmacology for Nurses.pdf` | OpenStax *Pharmacology for Nurses* (~1,200 pages, 47 MB) | Free from OpenStax, see below |
-
-Download the pharmacology book directly from OpenStax:
-
-```bash
-curl -L -o "Data/OpenStax Pharmacology for Nurses.pdf" https://assets.openstax.org/oscms-prodcms/media/documents/Pharmacology-WEB.pdf
-```
-
-You can add **any other medical PDFs** too: every `*.pdf` in `Data/` is indexed. To show a friendly book title under answers instead of the file name, add the file to `SOURCE_TITLES` in `src/config.py`.
-
-> **More Gale volumes:** the encyclopedia has several volumes, but they are copyrighted, so this project doesn't download them. If you own them, put the PDFs in `Data/` (any file name containing "Gale" is put in the *encyclopedia* collection) and rebuild.
-
-Then download the free web sources (about 5 minutes; WHO pages are fetched politely, one per second):
+**℞ 3 · Build the knowledge base** (once). Put `Gale Encyclopedia of Medicine. Vol. 1. 2nd ed.pdf` (your own copy) and the free [OpenStax *Pharmacology for Nurses*](https://assets.openstax.org/oscms-prodcms/media/documents/Pharmacology-WEB.pdf) PDF in `Data/`, then:
 
 ```bash
 python fetch_sources.py
 ```
-
-| Source | What | Licence |
-|--------|------|---------|
-| [MedlinePlus](https://medlineplus.gov/xml.html) (U.S. National Library of Medicine) | ~1,000 health-topic summaries, from the official daily XML file | U.S. government content; see [MedlinePlus usage terms](https://medlineplus.gov/about/using/usingcontent/) |
-| [WHO fact sheets](https://www.who.int/news-room/fact-sheets) | ~240 fact sheets on diseases and health topics | CC BY-NC-SA 3.0 IGO (non-commercial use with attribution) |
-
-Re-run it now and then to pick up updates, then rebuild the knowledge base.
-
-### 7. Build the knowledge base
-
 ```bash
 python store_index.py
 ```
 
-This will:
-1. Load and clean every PDF in `Data/` (removing page footers and words hyphenated across lines)
-2. Add the MedlinePlus and WHO documents from `Data/web/`, and split everything into 1000-character chunks with 150 characters of overlap (13,828 chunks for the two books + web sources)
-3. Save a copy of the chunks to `artifacts/chunks.jsonl`, used for keyword search
-4. Create the `medichatbot` Pinecone index (384 dimensions, cosine metric) if it doesn't exist
-5. Clear the `medical_v2` namespace, then embed and upload all chunks to it
+<sub>About 5 minutes to download MedlinePlus + WHO, then about 12 minutes to embed and upload 13,828 chunks on a laptop CPU.</sub>
 
-It takes about 12 minutes on a typical laptop CPU (about 2.5 to read the PDFs, 8.5 to embed and upload). **Run it again whenever you add, remove or change PDFs.** It replaces the namespace's contents, so the index always matches `Data/`.
-
-> The app needs **both** Pinecone and `artifacts/chunks.jsonl`. If the chunk file is missing (for example on a new computer), the app still works but skips keyword search. Run `store_index.py` once to restore it.
-
-### 8. (Optional) Measure retrieval quality
-
-```bash
-python eval_retrieval.py
-```
-
-This asks the 16 test questions in `eval/questions.json` and checks whether a passage containing the expected keywords comes back in the top 5. It compares the original setup with each improvement. No LLM calls are made, so it is free. Add `--verbose` to see the top source for each question.
-
-Results on the current knowledge base:
-
-| Setup | Hit@5 | MRR | Seconds / question |
-|-------|------:|----:|-------------------:|
-| Original: 300-char chunks, encyclopedia only, vector search | 56% | 0.52 | 0.6 |
-| 1000-char chunks, all 4 sources, vector search | 100% | 0.81 | 0.3 |
-| + BM25 keyword search (hybrid) | 100% | 0.81 | 0.3 |
-| **+ cross-encoder reranker (what the app uses)** | **100%** | **0.87** | 1.6 |
-
-(With only the two books, the app's setup scored 100% / 0.90. Adding ~6,000 web passages gives more competing candidates, so the first relevant passage is slightly less often ranked #1.)
-
-- **Hit@5**: share of questions where a relevant passage was in the top 5.
-- **MRR** (mean reciprocal rank): 1.0 means the relevant passage was always ranked first; 0.5 means it was second on average.
-- Keyword matching is a rough automatic judge, so use these numbers to compare setups rather than as absolute accuracy. The old setup only had the encyclopedia, so it can't answer the drug questions at all.
-
----
-
-## Running the app
+**℞ 4 · Start**
 
 ```bash
 python app.py
 ```
 
-When the server is ready, the chat opens automatically in your default browser at **<http://localhost:8080>**.
+→ **<http://localhost:8080>** opens by itself. For a production server, use `python serve.py`.
 
-### Choosing the browser
+<details>
+<summary><b>Dosage notes</b>: browser choice, ports, lite mode, other PDFs, licences</summary>
 
-| Command | Opens in |
-|---------|----------|
-| `python app.py` | Your system's default browser |
-| `python app.py --browser chrome` | Google Chrome |
-| `python app.py --browser edge` | Microsoft Edge |
-| `python app.py --browser none` | Nothing. Open <http://localhost:8080> yourself in any browser (Chrome, Edge, Firefox, Brave, …) |
+<br/>
 
-To make a choice permanent, add `OPEN_BROWSER=chrome` (or `edge`, `default`, `none`) to `.env`. A `--browser` flag on the command line overrides it. If the chosen browser isn't installed, the app opens your default browser instead. Chrome and Edge are found automatically on Windows, macOS and Linux.
+| Command / setting | Effect |
+|---|---|
+| `python app.py --browser chrome` · `edge` · `none` | Choose the browser (or set `OPEN_BROWSER` in `.env`) |
+| `python serve.py` | Production server (waitress, 8 threads, still streams) |
+| `set RETRIEVER=lite&& python serve.py` | Lite mode, as on Render (`pip install -r requirements-lite.txt` first) |
+| `PORT=5000` · `HOST=0.0.0.0` | Another port · allow other devices on your network |
+| `FLASK_DEBUG=1` | Auto-reload (always kept on `127.0.0.1`) |
 
-### Notes
+- **Any** PDF in `Data/` is indexed. Give it a nice title in `SOURCE_TITLES` (`src/config.py`). Other Gale volumes are copyrighted, so add them only if you own them.
+- **Licences:** MedlinePlus is U.S. government content ([terms](https://medlineplus.gov/about/using/usingcontent/)); WHO fact sheets are CC BY-NC-SA 3.0 IGO (non-commercial, with attribution).
 
-- The first start is slower because it downloads the embedding model (~90 MB) to `~/.cache/huggingface`. Later starts are quick.
-- By default the server listens only on `127.0.0.1` (your own computer). To have it reload automatically when you edit Python files, set `FLASK_DEBUG=1` in `.env` (debug mode is always kept on `127.0.0.1` for safety).
-- To stop the server, press `Ctrl + C`.
-- To use another port, set `PORT=5000` in `.env`.
-
-Running without activating the venv (Windows):
-```bash
-.venv/Scripts/python app.py
-```
-
-### Production server
-
-`python app.py` uses Flask's development server, which is fine for trying things out but isn't built for real traffic. For a long-running or shared setup, use the production server instead (waitress; works on Windows, macOS and Linux):
-
-```bash
-python serve.py
-```
-
-It loads the models first, then serves on `HOST`:`PORT` from `.env` (default `127.0.0.1:8080`) with 8 threads, so several people can chat at once and answers still stream word by word. It doesn't open a browser. Inside Docker the app runs under **gunicorn** instead (see [Docker](#docker)).
-
-## Using the chatbot
-
-- Type a medical question (for example, *"What are the symptoms of diabetes?"*) and press **Enter**, or click a suggested question. **Shift + Enter** adds a new line.
-- The answer streams in word by word. Click the **■ Stop** button (where the send button was) to stop it early; what was written so far is kept.
-- Follow-up questions work: the bot first rewrites a follow-up into a standalone question (e.g. *"what are its treatments?"* → *"what are the treatments for asthma?"*) before searching, and the last 8 messages are sent to the LLM as context.
-- Messages that are *only* a greeting or thanks ("hi", "thanks!", "bye") are answered instantly without calling the LLM. A greeting followed by a question ("hey, what causes diabetes?") is answered normally.
-- Under each answer:
-  - **📖 N sources**: click to see the book and page each answer came from
-  - **Copy**: copies the answer (as Markdown) to the clipboard
-  - **👍 / 👎**: rate the answer. Click again to undo
-- **New chat** (top of the sidebar) starts a fresh conversation. Earlier chats stay in the sidebar, grouped into *Today*, *Yesterday*, *Previous 7 days* and so on. Use the search box to filter them by title, and hover a chat to **rename ✏️** or **delete 🗑️** it.
-- Each chat's address includes its id (`?c=…`), so refreshing the page keeps you in the same chat.
-- **Light / dark mode**: button at the bottom of the sidebar. Your choice is remembered in this browser.
-- On a phone, tap **☰** (top left) to open the sidebar.
-
-### Asking in Hindi or another Indian language
-
-Pick a language from the **🌐 language menu** at the top, or leave it on **Auto language**: questions typed in an Indian script (e.g. *"मधुमेह के लक्षण क्या हैं?"*) are detected automatically. For Hindi typed in English letters (*"mujhe bukhar hai"*), choose **हिन्दी** in the menu.
-
-Behind the scenes the question is translated to English to search the (English) sources, and the answer is written in your language. Safety checks run on both the original text and the English translation, and common Hindi/Hinglish emergency phrases (*"सीने में दर्द हो रहा है"*, *"saans nahi aa rahi"*) are recognised directly.
-
-### Voice: speak and listen
-
-- Click **🎤** in the message box and speak. The question is sent when you stop talking, and **the answer is read aloud automatically**. Choose your language in the 🌐 menu first; speech recognition uses it (Auto = English).
-- Click **🔊** under any answer to hear it; click again to stop.
-- Voice input works in **Chrome and Edge** (the mic button is hidden in browsers without speech recognition). The browser asks for microphone permission the first time.
-- Read-aloud uses the voices installed on your device. Windows usually has English (India) voices; for **Hindi read-aloud use Microsoft Edge** (it includes online Hindi voices) or add a Hindi voice in Windows *Settings → Time & language → Speech*.
-
-### Uploading a report, prescription or photo
-
-Click **📎** in the message box, or drag a file onto the chat. PDF, PNG, JPG and WebP up to 10 MB are accepted.
-
-- **Text PDFs** (most lab reports from labs/hospitals) are read directly.
-- **Scanned PDFs and photos** are read by Mistral's **Pixtral** vision model: it transcribes text (test values, units, reference ranges) into a table, or describes what is visible in a photo of skin or a wound **without naming a diagnosis**.
-- Then ask anything: *"Explain my results in simple words"*, *"Which values are outside the normal range?"*, *"What does HbA1c measure?"*. The answer uses your file plus the medical sources, and lists the file as a source.
-- Image answers always carry a warning that AI image reading can be wrong and is not a diagnosis.
-
-Files are stored in `instance/uploads/` on the computer running the app and are **deleted together with their chat**.
-
-### Symptom checker
-
-Click **Symptom checker** (top right, or on the welcome screen). Fill in your symptoms (quick buttons for common ones), age, sex, how long, how bad (1–10), existing conditions, current medicines, and tick any **warning signs**. You'll get:
-
-- **Possible causes** (clearly marked as not a diagnosis)
-- **How urgent it is**: emergency now / see a doctor today / in the next few days / usually fine at home
-- **Which doctor to see** (e.g. general physician, ENT specialist, dermatologist)
-- **What you can do meanwhile** and **when to get urgent help**
-
-Ticking a warning sign (chest pain, breathing difficulty, stroke signs, heavy bleeding, seizure, stiff neck with fever, thoughts of self-harm) skips the AI and shows the emergency or crisis card immediately.
-
-### Filtering by source
-
-The **📖 source menu** at the top limits answers to one collection: *Gale Encyclopedia*, *OpenStax Pharmacology*, *MedlinePlus (NIH)* or *WHO fact sheets*. *All sources* is the default. Your choice is remembered in this browser.
-
-### Where chats are saved
-
-Chats are stored in a SQLite database at `instance/medirag.db`, so they survive server restarts. Each browser gets an anonymous id in a signed cookie and only sees its own chats; there are no accounts. Clearing the browser's cookies starts a fresh, empty history (the old chats stay in the database).
-
-> If `FLASK_SECRET_KEY` isn't set in `.env`, a random key is generated once and saved to `instance/secret_key`, so cookies stay valid across restarts.
-
-### Reviewing 👎 feedback
-
-Open <http://localhost:8080/api/feedback/summary> **on the computer running the app** (it's blocked for other devices). It shows the 👍 and 👎 totals and the 20 most recent 👎 answers together with the question that was asked, which makes weak answers easy to find and fix.
-
-## Safety features
-
-Every message goes through safety checks in [`src/safety.py`](src/safety.py) **before** the AI sees it. When a check triggers, the AI is skipped and a fixed, reviewed reply is shown instead, so it's instant and works even if Mistral is down or rate-limited.
-
-| Situation | Example | What happens |
-|-----------|---------|--------------|
-| 🚨 **Emergency happening now** | *"My dad is having chest pain"*, *"my son swallowed bleach"*, *"her face is drooping"* | Red card: call **112** (emergency) or **108** (ambulance), plus short first-aid steps for that situation |
-| 💙 **Suicidal thoughts / self-harm** | *"I want to end my life"*, *"my friend is suicidal"* | Blue card with **Tele-MANAS 14416** (free, 24×7) and **112** |
-| 💊 **Personal dose or prescription** | *"How much paracetamol should I take?"*, *"Which medicine should I take for a cold?"* | Polite refusal; suggests a doctor or pharmacist and offers general information instead |
-| ℹ️ **General question about an emergency topic** | *"What are the signs of a heart attack?"* | Answered normally, with an orange *"if this is happening now, call 112"* notice |
-| 🙅 **Nothing relevant in the books** | *"What is long COVID?"*, *"What's the capital of France?"* | *"I couldn't find reliable information…"* instead of a guess |
-
-On phones, the helpline numbers are tappable links that start a call.
-
-**How "happening now" is told apart from a general question:** a symptom alone isn't enough. The message must also describe someone experiencing it (*"I'm…"*, *"my mother has…"*, *"her throat is swelling"*) or contain an urgent phrase (*"right now"*, *"help me"*, *"what should I do"*). Mentions of the past, prevention or risk (*"I had a stroke last year"*) are not treated as emergencies. Ambiguous messages lean towards showing emergency information.
-
-**How "nothing relevant" is decided:** the reranker scores how well the best passage answers the question. Real medical questions scored between **+1.3 and +8.8**, off-topic ones between **−10.9 and −8.4**, and medical topics the books don't cover (long COVID, Zika, monkeypox) between **−9.7 and −2.4**. The cut-off is **−1.0** (`MIN_RELEVANCE_SCORE`).
-
-**Also built into the AI's instructions:** never give specific doses, never tell the user which medicine to take, start or stop, and never diagnose.
-
-**Rate limiting:** each visitor can send **10 messages per minute and 100 per day** (`CHAT_RATE_LIMIT`). Emergency and crisis messages are **never** rate-limited. Separately, calls to Mistral are spaced at least 1.1 seconds apart across all users (`MISTRAL_MIN_INTERVAL`), which keeps the free tier's ~1 request/second limit from being hit.
-
-> ⚠️ These are keyword rules: fast, free and predictable, but not perfect. They can miss unusual wording or flag a harmless message. They support, but do not replace, professional care. The emergency numbers default to India; change them in `.env` for other countries.
-
-## Configuration reference
-
-### Environment variables (`.env`)
-
-| Variable            | Required | Default             | Purpose |
-|---------------------|----------|---------------------|---------|
-| `PINECONE_API_KEY`  | ✅       | —                   | Access to the Pinecone vector database |
-| `MISTRAL_API_KEY`   | ✅       | —                   | Access to the Mistral LLM |
-| `FLASK_SECRET_KEY`  | Recommended | random, saved in `instance/secret_key` | Signs the session cookie that links a browser to its saved chats |
-| `MISTRAL_MODEL`     | ❌       | `open-mistral-nemo` | Which Mistral model answers questions |
-| `PORT`              | ❌       | `8080`              | Port the web server listens on |
-| `HOST`              | ❌       | `127.0.0.1`         | Address to listen on. Use `0.0.0.0` to allow other devices on your network (ignored while debug mode is on) |
-| `FLASK_DEBUG`       | ❌       | off                 | `1` enables auto-reload and the debugger (dev server only). Never enable it on a network-visible server |
-| `RETRIEVER`         | ❌       | `full`              | `full` (local PyTorch models, best quality, ~2 GB RAM) or `lite` (fits 512 MB; see [Free deployment](#free-deployment-render)) |
-| `RERANK_MODEL`      | ❌       | `bge-reranker-v2-m3` | Lite mode: Pinecone-hosted reranker. Empty = vector order only |
-| `MIN_RERANK_SCORE` / `MIN_VECTOR_SCORE` | ❌ | `0.2` / `0.45` | Lite mode "won't guess" thresholds (hosted-reranker score / cosine similarity) |
-| `TRUST_PROXY`       | ❌       | off                 | `1` behind a hosting proxy (Render etc.) so rate limits use each visitor's real IP |
-| `CROSS_SITE_COOKIES` | ❌      | off                 | `1` when the app is shown inside another site's iframe over HTTPS |
-| `CHUNKS_FROM_PINECONE` | ❌    | on                  | If `artifacts/chunks.jsonl` is missing, rebuild it from Pinecone at startup (needed on servers) |
-| `INSTANCE_DIR` / `CHAT_DB_PATH` | ❌ | `instance/`, `instance/medirag.db` | Where chat history, uploads and the secret key are stored |
-| `MAX_UPLOAD_MB`     | ❌       | `10`                | Largest file users can upload |
-| `OPEN_BROWSER`      | ❌       | `default`           | Browser to open on startup: `default`, `chrome`, `edge` or `none` |
-| `EMERGENCY_NUMBER`  | ❌       | `112`               | Emergency number shown in emergency and crisis replies |
-| `AMBULANCE_NUMBER`  | ❌       | `108`               | Ambulance number shown in emergency replies |
-| `MENTAL_HEALTH_HELPLINE` | ❌  | `14416`             | Mental-health helpline (Tele-MANAS) shown in crisis replies |
-| `MIN_RELEVANCE_SCORE` | ❌     | `-1.0`              | Below this reranker score the bot declines to answer. Lower = answers more, but guesses more |
-| `CHAT_RATE_LIMIT`   | ❌       | `10 per minute;100 per day` | Messages allowed per visitor (Flask-Limiter syntax) |
-| `MISTRAL_MIN_INTERVAL` | ❌    | `1.1`               | Minimum seconds between Mistral calls across all users |
-| `MISTRAL_VISION_MODEL` | ❌    | `pixtral-12b-2409`  | Model that reads uploaded photos and scanned PDFs |
-| `UPLOAD_RATE_LIMIT` | ❌       | `5 per minute;30 per day` | Uploads allowed per visitor (each image uses a vision-model call) |
-
-**Choosing `MISTRAL_MODEL`:** your Mistral plan decides which models you can use. `open-mistral-nemo` works on the free tier. With a paid plan you can switch to stronger models such as `mistral-small-latest`, `mistral-medium-latest` or `mistral-large-latest` for better answers.
-
-### Values in code you may want to tweak
-
-Every setting lives in [`src/config.py`](src/config.py); the ones marked *(env)* there can also be set in `.env`.
-
-| Setting | File | Default |
-|---------|------|---------|
-| Pinecone index name | `src/config.py` (`INDEX_NAME`) | `medichatbot` |
-| Pinecone namespace | `src/config.py` (`NAMESPACE`), or `PINECONE_NAMESPACE` in `.env` | `medical_v2` |
-| Candidates per search / passages sent to the LLM | `src/config.py` (`CANDIDATES_PER_RETRIEVER`, `FINAL_K`) | `20` / `5` |
-| Vector vs. keyword weight when merging results | `src/config.py` (`VECTOR_WEIGHT`) | `0.6` / `0.4` |
-| Reranker model | `src/config.py` (`RERANKER_MODEL`) | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
-| Book titles shown in sources | `src/config.py` (`SOURCE_TITLES`) | Gale, OpenStax Pharmacology |
-| LLM temperature | `app.py` | `0.2` |
-| Chunk size / overlap (rerun `store_index.py` after changing) | `src/config.py` (`CHUNK_SIZE`, `CHUNK_OVERLAP`) | `1000` / `150` characters |
-| Chat history length sent to the LLM | `src/config.py` (`MAX_HISTORY_MESSAGES`) | last 8 messages |
-| Quick replies for greetings | `app.py` (`QUICK_RESPONSES`, `GREETING_ALIASES`) | hi, hello, thanks, bye, … |
-| System prompt / persona | `app.py` (`system_prompt`) | "Dr. Insight" |
-
-> If you change the embedding model, the vector dimension changes too. You must then recreate the Pinecone index with the new dimension and rerun `store_index.py`.
-
-## API reference
-
-### `GET /`
-Returns the chat web page.
-
-All endpoints use the anonymous session cookie to know whose chats are whose.
-
-| Method & path | Purpose |
-|---------------|---------|
-| `POST /api/chat/stream` | Send a message; the answer streams back as [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (used by the web page) |
-| `POST /chat` | Send a message; get the whole answer as one JSON response (handy for scripts) |
-| `GET /api/conversations` | List your saved chats, newest first |
-| `GET /api/conversations/<id>` | One chat with all its messages |
-| `PATCH /api/conversations/<id>` | Rename a chat: `{"title": "..."}` |
-| `DELETE /api/conversations/<id>` | Delete a chat and its messages |
-| `POST /api/messages/<id>/feedback` | Rate an answer: `{"value": 1}` (👍), `-1` (👎) or `null` (clear) |
-| `POST /api/symptom-check/stream` | Guided symptom check (streams like `/api/chat/stream`). Body: `symptoms` (required), `age`, `sex`, `duration`, `severity`, `conditions`, `medicines`, `red_flags` (list) |
-| `POST /api/uploads` | Upload a PDF or image (multipart form: `file`, optional `conversation_id`, `language`) |
-| `GET /api/attachments/<id>/file` | Download/view an uploaded file (only its owner) |
-| `GET /api/feedback/summary` | Feedback totals + recent 👎 answers (only from the computer running the app) |
-
-Both chat endpoints take `{"message": "...", "conversation_id": "...", "language": "auto", "collections": []}`. Leave out `conversation_id` (or pass an unknown one) to start a new chat. `language` is `auto` or a code (`en`, `hi`, `bn`, `mr`, `ta`, `te`, `gu`, `kn`, `ml`, `pa`); `collections` can limit the search to any of `encyclopedia`, `pharmacology`, `medlineplus`, `who`.
-
-### `POST /api/chat/stream`
-
-Events, in order:
-
-| Event | Data | Meaning |
-|-------|------|---------|
-| `conversation` | `{"id", "title"}` | The chat this message belongs to (new or existing) |
-| `token` | `{"text"}` | The next piece of the answer; append them in order |
-| `done` | `{"message_id", "content", "sources", "notice", "kind"}` | The complete saved answer |
-| `error` | `{"text"}` | Something went wrong; `text` is a message to show |
-
-### `POST /chat`
-
-**Request:**
-```json
-{ "message": "What causes migraines?" }
-```
-
-**Response:**
-```json
-{
-  "conversation_id": "5f3f5a1ae87e40dc8aca173aa6ab9ff0",
-  "message_id": 12,
-  "response": "Migraines are ...",
-  "sources": [
-    { "title": "Gale Encyclopedia of Medicine, Vol. 1", "page": "412" },
-    { "title": "OpenStax Pharmacology for Nurses", "page": "301" }
-  ]
-}
-```
-| Field | When present | Meaning |
-|-------|--------------|---------|
-| `response` | always | The reply text (may contain `**bold**` and line breaks) |
-| `sources` | normal answers | Book and page of each passage the answer was based on, best match first |
-| `notice` | general questions about emergency topics | Extra *"if this is happening now, call…"* note to show with the answer |
-| `kind` | safety replies | `emergency`, `crisis`, `dosage`, `low_confidence` or `rate_limited` |
-
-When the rate limit is exceeded, the status code is **429** and `kind` is `rate_limited`.
-
-Example with curl:
-```bash
-curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "{\"message\": \"What causes migraines?\"}"
-```
+</details>
 
 ---
 
-## Running the tests
+## 🧪 Lab results
 
-There are 99 automated tests:
+### Retrieval
 
-- **27 API tests** for the Flask app: `/chat` and streaming answers, greeting logic, follow-up rewriting, Hindi translation, source filter, safety paths, **error handling** (LLM failure, Mistral 429 retry, rate limit, empty and malformed requests), symptom checker, PDF and image uploads, privacy between users, feedback and the health check. The AI parts are replaced by fakes (`tests/conftest.py`), so they run in seconds without API keys, model downloads or network.
-- **5 for lite mode**: hosted-rerank order, fallback when the free monthly reranks run out, source filter, thresholds.
-- **58 for the safety rules**: emergencies, crises, dosage requests, general questions that should only get a notice, normal questions that must pass through untouched, and Hindi/Hinglish emergency phrases.
-- **6 for saved chats**: titles, privacy between users, message order, feedback rules and deletion.
-- **3 for language detection**: the 8 Indian scripts, English/Hinglish, and explicit language choice.
+Measured with `python eval_retrieval.py` on 16 test questions. It makes no LLM calls, so it's free to run.
 
-They need no API keys and run in about 5 seconds:
+| Setup | Hit@5 | MRR | |
+|---|:-:|:-:|---|
+| Original: 300-char chunks, one book, vectors only | 56% | 0.52 | `█████▏    ` |
+| 1000-char chunks, 4 sources, vectors | 100% | 0.81 | `████████  ` |
+| + BM25 hybrid search | 100% | 0.81 | `████████  ` |
+| **+ cross-encoder rerank (full mode)** | **100%** | **0.87** | `████████▋ ` |
+| Lite mode (Render): hosted rerank | 100% | 0.82 | `████████▏ ` |
+
+<sub>Hit@5: a relevant passage is in the top 5. MRR: 1.0 means it's always ranked first. Keyword matching is a rough judge, so use these to compare setups, not as absolute accuracy.</sub>
+
+### Tests
+
+**101 tests, about 5 seconds, with no API keys or network** (the AI is faked in `tests/conftest.py`). [GitHub Actions](.github/workflows/ci.yml) runs them and builds both Docker images on every push.
 
 ```bash
 pip install -r requirements-dev.txt
@@ -592,25 +244,70 @@ pip install -r requirements-dev.txt
 python -m pytest -q
 ```
 
-When you change a rule in `src/safety.py`, add the message that prompted the change to `tests/test_safety.py`.
+| Suite | | Covers |
+|---|:-:|---|
+| `test_app.py` | 29 | `/chat`, streaming, greetings, follow-ups, Hindi, filters, safety paths, **error handling** (LLM down, 429 retry, rate limit, bad input), symptom checker, uploads, **lab range checks**, privacy, feedback, health |
+| `test_safety.py` | 58 | Emergencies, crises, dosage, notices, safe questions, Hindi and Hinglish |
+| `test_storage.py` · `test_retrieval_lite.py` · `test_languages.py` | 6 · 5 · 3 | Saved chats · hosted rerank and its fallback · script detection |
 
-### Continuous integration
+---
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request (free on public GitHub repos):
+## ⚠️ Contraindications
 
-1. **Tests**: installs the dependencies (CPU-only PyTorch) and runs `pytest`
-2. **Docker image builds**: checks both `Dockerfile` and `Dockerfile.render` still build (not pushed anywhere)
+Every message passes [`src/safety.py`](src/safety.py) **before** the AI sees it:
 
-See the results under the repo's **Actions** tab. A green ✅ next to a commit means all of the above passed. Render only deploys commits that pass (see below).
+| If the patient says… | Dr. Insight responds with |
+|---|---|
+| *"My dad is having chest pain"* · *"मेरे पिता को सीने में दर्द हो रहा है"* | 🚨 **112 / 108** + first-aid steps, instantly |
+| *"I want to end my life"* | 💙 **Tele-MANAS 14416** (free, 24×7) + 112 |
+| *"How much paracetamol should I take?"* | 💊 A polite refusal; ask a doctor or pharmacist |
+| *"What are the signs of a heart attack?"* | ℹ️ A normal answer + *"if this is happening now, call 112"* |
+| *"What's the capital of France?"* | 🙅 *"I'd rather not guess"* |
 
-## Docker
+**Known limitations, stated honestly:**
 
-There are two images:
+- The safety rules use **keywords**: fast and predictable, but unusual wording can slip through or trigger by mistake.
+- A small free LLM can still **phrase things imperfectly**. Lab values are range-checked in code for exactly this reason.
+- Photo descriptions from the vision model can be wrong, so every image answer carries a warning.
+- The free demo **forgets chats** when it restarts, and visitors share a monthly AI quota.
 
-- **`Dockerfile`** (full quality, ~2 GB RAM): for your own computer or a bigger server.
-- **`Dockerfile.render`** (lite, ~250 MB RAM): for free hosting; see [Free deployment](#free-deployment-render).
+<details>
+<summary><b>How the rules decide</b></summary>
 
-The [`Dockerfile`](Dockerfile) builds a production image: Python 3.12, CPU-only PyTorch, the embedding and reranker models baked in, and **gunicorn** (1 worker × 8 threads, so the models are loaded once) serving on port 7860. API keys are **not** in the image; you pass them when starting it.
+<br/>
+
+- **"Happening now" vs. a general question:** the message must describe someone experiencing the symptom (*"I'm…"*, *"my mother has…"*) or be urgent (*"right now"*, *"help"*). The past, prevention and risk don't count. When unsure, the rules lean towards showing help.
+- **"Won't guess" cut-offs**, set from measured scores. Full mode: real questions scored **+1.3 to +8.8**, off-topic ones **−10.9 to −8.4** → cut-off **−1.0**. Lite mode: **0.82–1.0** vs **≤ 0.04** → cut-off **0.2** (cosine 0.45 when the free reranks run out).
+- **Rate limits:** 10 messages/min and 100/day per visitor; emergencies are never limited. Mistral calls are spaced 1.1 s apart.
+- **Emergency numbers** default to India; change them in `.env`.
+
+</details>
+
+---
+
+## 🚑 Discharge: deploy for free
+
+Live at **[medirag-k33w.onrender.com](https://medirag-k33w.onrender.com)** on Render's free tier: **₹0, no credit card.**
+
+> [!NOTE]
+> Render's free tier has **512 MB RAM and 0.1 CPU**, too small for PyTorch. So it runs **lite mode** ([`src/retrieval_lite.py`](src/retrieval_lite.py)): the **same** embedding model through ONNX (identical vectors, no re-index), Pinecone search and Pinecone's **hosted reranker** (500 free per month, then vector order). **~240 MB RAM · MRR 0.82**, with every feature intact.
+
+1. Sign up at **[dashboard.render.com](https://dashboard.render.com/register)** with GitHub.
+2. **New + → Blueprint** → choose this repo. Render reads [`render.yaml`](render.yaml).
+3. Paste `PINECONE_API_KEY` and `MISTRAL_API_KEY` (the secret key is generated for you).
+4. **Deploy.** It's live in about 10 minutes, and every push to `main` **redeploys once CI passes**.
+
+<details>
+<summary><b>Free-tier side effects</b> · <b>Docker</b></summary>
+
+<br/>
+
+- Sleeps after 15 idle minutes (about 1 minute to wake up) · chats and uploads reset on restart · 500 hosted reranks per month · visitors share your Mistral quota (the rate limit protects it).
+
+| Image | For | RAM |
+|---|---|---|
+| [`Dockerfile`](Dockerfile) | Full quality on your own machine | ~2 GB |
+| [`Dockerfile.render`](Dockerfile.render) | Free hosting (lite) | ~240 MB |
 
 ```bash
 docker build -t medirag .
@@ -619,102 +316,121 @@ docker build -t medirag .
 docker run --rm --env-file .env -p 7860:7860 medirag
 ```
 
-Then open <http://localhost:7860>. On the first start the container downloads the keyword-search index from Pinecone (about 3 minutes); `GET /healthz` returns `{"status": "ok"}` once it's ready. Chat history lives inside the container and is lost when it's removed; add `-v medirag-data:/app/instance` to keep it.
+Then open <http://localhost:7860>. `GET /healthz` returns `ok` when it's ready; add `-v medirag-data:/app/instance` to keep chats. API keys are never baked into the images.
 
-## Free deployment (Render)
-
-A public demo link for your portfolio, **free and with no credit card**, on [Render](https://render.com)'s free tier. Pinecone and Mistral stay on their free tiers too.
-
-> **Why Render, and why a "lite" mode?** Hugging Face Spaces now requires a paid PRO plan to run Docker apps, Railway has no free tier, and Render's free tier has only **512 MB of RAM and 0.1 CPU**: too small for the PyTorch models. So the free deployment uses `RETRIEVER=lite` ([`src/retrieval_lite.py`](src/retrieval_lite.py)):
->
-> | | Full mode (your computer) | Lite mode (Render) |
-> |---|---|---|
-> | Question embedding | PyTorch `all-MiniLM-L6-v2` | **Same model** in ONNX Runtime (identical vectors, no re-index needed) |
-> | Search | Pinecone + BM25 keyword search (top 40) | Pinecone (top 20) |
-> | Reranking | Local cross-encoder | Pinecone's hosted `bge-reranker-v2-m3` (free: 500/month), then vector order once those run out |
-> | Retrieval quality (16 test questions) | Hit@5 100%, MRR 0.87 | Hit@5 100%, MRR 0.82 (0.81 without reranks) |
-> | RAM | ~2 GB | ~250 MB |
->
-> Everything else (safety rules, languages, uploads, voice, symptom checker) is the same.
-
-**One-time setup (about 10 minutes):**
-
-1. **Sign up** at <https://dashboard.render.com/register> with **"GitHub"** (free, no card).
-2. In the Render dashboard click **New + → Blueprint**.
-3. **Connect your GitHub repo** `MediRAG` (allow Render access to it when asked) and click **Connect**. Render reads [`render.yaml`](render.yaml).
-4. It asks for two secret values. Paste them from your `.env` file:
-   - `PINECONE_API_KEY`
-   - `MISTRAL_API_KEY`
-
-   (`FLASK_SECRET_KEY` is generated automatically.)
-5. Click **Apply** / **Deploy Blueprint**. The first build takes about 5–10 minutes. When the service shows **Live**, open its URL:
-
-   **`https://medirag.onrender.com`** (or `https://medirag-xxxx.onrender.com` if that name is taken; it's shown at the top of the service page)
-
-From then on, **every push to `main` redeploys automatically, but only after GitHub Actions passes** (`autoDeployTrigger: checksPass`).
-
-**Limits of the free tier, good to know:**
-- The app **sleeps after 15 minutes without visitors**. The next visit wakes it up in about a minute (the page loads once the app is ready).
-- Its disk is temporary: **saved chats and uploads are cleared whenever it restarts or redeploys**. Fine for a demo.
-- Free hosted reranks: **500 per month** for your Pinecone account. After that, answers use the vector-search order until the next month (slightly lower quality, still sourced and safe).
-- Everyone using the demo shares your **Mistral free-tier quota**. The per-visitor rate limit (10 messages/minute, 100/day) protects it; lower `CHAT_RATE_LIMIT` under the service's **Environment** tab if needed.
-- 750 free instance-hours per month: enough for one always-available service.
-
-**Try lite mode on your computer** (optional):
-```bash
-pip install -r requirements-lite.txt
-```
-```bash
-set RETRIEVER=lite&& python serve.py
-```
-
-## Troubleshooting
-
-| Problem | Cause & fix |
-|---------|-------------|
-| `Missing environment variables: ...` on start | `.env` is missing, misnamed (e.g. `.env.txt`), or not in the project root. Check the file name and location. |
-| Bot always replies *"I'm having trouble processing that request"* | The LLM call failed. Check the terminal running `app.py` for the full error. Common causes are listed in the next rows. |
-| Error `403 ... not available in your subscription tier` | Your Mistral plan can't use the configured model. Set `MISTRAL_MODEL=open-mistral-nemo` in `.env`. |
-| Error `429 Rate limit exceeded` | The Mistral free tier allows about 1 request per second, and has monthly limits per model. Wait a moment, send messages more slowly, or switch `MISTRAL_MODEL`. |
-| Answers say there isn't enough information | The Pinecone index is empty or has a different name or namespace. Check the vector count in the Pinecone console, or run `store_index.py`. |
-| `Index 'medichatbot' not found` | You haven't run `store_index.py` on this Pinecone account yet (step 7). |
-| Log says `chunks.jsonl not found; keyword search disabled` | Run `python store_index.py` to create `artifacts/chunks.jsonl`. |
-| `No PDF text found in .../Data` | Put the PDFs in `Data/` first (step 6). |
-| `not enough memory` while indexing or chatting | Indexing and the app each load AI models. Close other heavy programs, and don't run `store_index.py` while the app is running. |
-| `ModuleNotFoundError` (e.g. `langchain_huggingface`, `src`) | The venv isn't activated, or dependencies aren't installed. Activate `.venv` and rerun `pip install -r requirements.txt`. |
-| PyTorch download is huge / slow | You installed the default GPU build. Uninstall it and install the CPU build with the command in step 4. |
-| Hugging Face "symlinks" warning on Windows | Harmless. To hide it, set `HF_HUB_DISABLE_SYMLINKS_WARNING=1`, or enable Windows Developer Mode. |
-| `Address already in use` / port 8080 busy | Another program is using the port. Set `PORT=5000` in `.env`, or stop the other program. |
-| Browser opens but shows "This site can't be reached" | The server stopped or is still starting. Check the terminal for errors, then refresh. Use `http://localhost:8080` (not `https://`). |
-| No browser window opens | `OPEN_BROWSER=none` may be set in `.env`. Open <http://localhost:8080> manually, or run `python app.py --browser chrome`. |
-| Chat history disappeared | The browser's cookies were cleared, or you're in a private window or another browser. Chats are tied to the browser's cookie. |
-| Answer appears all at once instead of streaming | A proxy or antivirus may be buffering the response. Streaming works when you open the app directly at `http://localhost:8080`. |
-| *"You're sending messages too quickly"* | You hit the rate limit (10 per minute by default). Wait a minute, or raise `CHAT_RATE_LIMIT` in `.env`. |
-| A normal question gets *"I couldn't find reliable information"* | The books may not cover it, or the wording is vague. Try naming the condition or medicine. To make the bot less strict, lower `MIN_RELEVANCE_SCORE` (e.g. `-3`). |
-| A harmless message got an emergency or dosage reply | The keyword rules erred on the side of caution. Rephrase it as a general question, e.g. *"What are the signs of…"*. |
-| No 🎤 button | Your browser doesn't support speech recognition (e.g. Firefox). Use Chrome or Edge. |
-| *"Microphone access was blocked"* | Allow the microphone for `localhost` in the browser's site settings (padlock icon in the address bar). |
-| Hindi answers are read aloud badly or not at all | No Hindi voice is installed. Use Microsoft Edge, or add a Hindi voice in Windows *Settings → Time & language → Speech*. |
-| Hinglish (*"mujhe bukhar hai"*) is answered in English | Auto-detection only recognises Indian scripts. Choose **हिन्दी** in the language menu. |
-| *"Couldn't find any readable text in that PDF"* | The PDF is scanned and the vision model couldn't read it. Upload a clearer photo of the page instead. |
-| Uploading a photo gives a 429 / rate-limit message | Image reading uses a Mistral vision call; the free tier is limited. Wait a minute. |
-| MedlinePlus / WHO sources never appear | Run `python fetch_sources.py`, then `python store_index.py`. |
-| Render deploy fails, or the service never becomes **Live** | Open the service's **Logs** tab. Usually a missing or wrong `PINECONE_API_KEY` / `MISTRAL_API_KEY`; fix it under **Environment**, then **Manual Deploy → Deploy latest commit**. |
-| Render didn't redeploy after a push | It waits for GitHub Actions to pass. Check the **Actions** tab for a red ❌. |
-| The demo takes ~1 minute to open | It was asleep (free tier sleeps after 15 idle minutes). Normal. |
-| `docker: ... daemon is not running` | Start Docker Desktop and wait until it says *Engine running*. |
-| Install fails on Python 3.13/3.14 | Some packages lack wheels for very new Python versions. Use Python 3.12. |
-
-## Customisation ideas
-
-- **Add more knowledge:** drop more PDFs into `Data/` and rerun `store_index.py`.
-- **Change the persona:** edit `system_prompt` in `app.py`.
-- **Use a different LLM:** swap `ChatMistralAI` for another LangChain chat model (OpenAI, Anthropic, Groq, a local Ollama model, ...).
-- **Tune retrieval:** change chunk size, `FINAL_K` or `VECTOR_WEIGHT` in `src/config.py`, rebuild, then rerun `eval_retrieval.py` to see whether it helped. Add your own questions to `eval/questions.json`.
-- **Keep chats on the hosted demo:** Render offers paid persistent disks; or point `CHAT_DB_PATH` at a mounted volume when self-hosting with Docker.
+</details>
 
 ---
 
-## Author
+## 📎 Appendix
 
-**Himanshu Kumar** — [github.com/himanshugithub360](https://github.com/himanshugithub360)
+<details>
+<summary><b>A · API</b></summary>
+
+<br/>
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/chat/stream` | Ask; answer streams as SSE: `conversation` → `token`… → `done` / `error` |
+| `POST /chat` | Ask; the full answer as JSON |
+| `POST /api/symptom-check/stream` | `symptoms`*, `age`, `sex`, `duration`, `severity`, `conditions`, `medicines`, `red_flags[]` |
+| `POST /api/uploads` | Multipart `file` (+ `conversation_id`, `language`) |
+| `GET /api/attachments/<id>/file` | View an upload (owner only) |
+| `GET` · `PATCH` · `DELETE /api/conversations[/<id>]` | List, read, rename, delete |
+| `POST /api/messages/<id>/feedback` | `{"value": 1 \| -1 \| null}` |
+| `GET /api/feedback/summary` | 👍/👎 totals + recent 👎 (localhost only) |
+| `GET /healthz` | `ok` once the models are loaded |
+
+```bash
+curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "{\"message\": \"What causes migraines?\"}"
+```
+
+Request: `message` + optional `conversation_id`, `language` (`auto`, `en`, `hi`, `bn`, `mr`, `ta`, `te`, `gu`, `kn`, `ml`, `pa`) and `collections` (`encyclopedia`, `pharmacology`, `medlineplus`, `who`). The response includes `response`, `sources[{title, page, url}]`, `notice`, `language` and `kind` (`emergency`, `crisis`, `dosage`, `low_confidence`, `symptom_check`, `error` or `rate_limited`, which comes with HTTP 429).
+
+</details>
+
+<details>
+<summary><b>B · Configuration</b> (everything lives in <code>src/config.py</code>; <i>(env)</i> settings can go in <code>.env</code>)</summary>
+
+<br/>
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PINECONE_API_KEY` · `MISTRAL_API_KEY` | (required) | API access |
+| `FLASK_SECRET_KEY` | saved in `instance/` | Signs the cookie that links a browser to its chats |
+| `MISTRAL_MODEL` · `MISTRAL_VISION_MODEL` | `open-mistral-nemo` · `pixtral-12b-2409` | Answer and image models |
+| `RETRIEVER` · `RERANK_MODEL` | `full` · `bge-reranker-v2-m3` | Full or lite mode · hosted reranker (lite) |
+| `MIN_RELEVANCE_SCORE` · `MIN_RERANK_SCORE` · `MIN_VECTOR_SCORE` | `-1.0` · `0.2` · `0.45` | "Won't guess" cut-offs |
+| `CHAT_RATE_LIMIT` · `UPLOAD_RATE_LIMIT` | `10 per minute;100 per day` · `5 per minute;30 per day` | Per visitor |
+| `MISTRAL_MIN_INTERVAL` · `MAX_UPLOAD_MB` | `1.1` · `10` | Seconds between AI calls · largest upload |
+| `EMERGENCY_NUMBER` · `AMBULANCE_NUMBER` · `MENTAL_HEALTH_HELPLINE` | `112` · `108` · `14416` | Helplines shown |
+| `HOST` · `PORT` · `FLASK_DEBUG` · `OPEN_BROWSER` | `127.0.0.1` · `8080` · off · `default` | Local server |
+| `TRUST_PROXY` · `CROSS_SITE_COOKIES` | off · off | Behind a hosting proxy · embedded in an iframe |
+| `CHUNKS_FROM_PINECONE` · `INSTANCE_DIR` · `PINECONE_NAMESPACE` | on · `instance/` · `medical_v2` | Keyword index · data folder · namespace |
+
+Code-level tuning: `CHUNK_SIZE`/`CHUNK_OVERLAP` (1000/150, rebuild after changing), `CANDIDATES_PER_RETRIEVER`/`FINAL_K` (20/5), `VECTOR_WEIGHT` (0.6), `MAX_HISTORY_MESSAGES` (8), `LLM_TEMPERATURE` (0.2). The persona and prompts are in `app.py`.
+
+</details>
+
+<details>
+<summary><b>C · Project structure</b></summary>
+
+<br/>
+
+```
+MediRAG/
+├── app.py                 # Flask app: RAG pipeline, streaming, uploads, history, feedback
+├── serve.py · wsgi.py     # Production servers (waitress · gunicorn)
+├── store_index.py         # Build the knowledge base → Pinecone + keyword index
+├── fetch_sources.py       # Download MedlinePlus + WHO
+├── eval_retrieval.py      # Measure retrieval (eval/questions.json)
+├── src/
+│   ├── config.py          # every setting
+│   ├── retrieval.py       # full: hybrid search + cross-encoder
+│   ├── retrieval_lite.py  # lite: ONNX + Pinecone + hosted rerank
+│   ├── safety.py          # emergency / crisis / dosage rules
+│   ├── documents.py       # uploads + lab range checks
+│   ├── languages.py       # 10 languages
+│   ├── storage.py         # SQLite
+│   └── helper.py · launcher.py
+├── templates/chat.html    # the whole UI
+├── static/ · docs/assets/ # icons, vendored JS · README images
+├── tests/                 # 101 tests
+└── Dockerfile · Dockerfile.render · render.yaml · .github/workflows/ci.yml
+```
+
+</details>
+
+<details>
+<summary><b>D · Troubleshooting</b></summary>
+
+<br/>
+
+| Symptom | Treatment |
+|---|---|
+| `Missing environment variables` | `.env` is missing, misnamed (`.env.txt`) or in the wrong folder |
+| *"I'm having trouble processing that request"* | Check the terminal; usually a Mistral `403` (set `MISTRAL_MODEL=open-mistral-nemo`) or `429` (slow down) |
+| `Index 'medichatbot' not found` / empty answers | Run `python store_index.py` |
+| `ModuleNotFoundError` · huge PyTorch download | Activate `.venv` · install the CPU build (℞ 1) |
+| Install fails on Python 3.13+ | Use Python 3.12 |
+| Port 8080 busy | `PORT=5000` in `.env` |
+| Real question → *"I'd rather not guess"* | Name the condition or medicine, or lower `MIN_RELEVANCE_SCORE` (e.g. `-3`) |
+| No 🎤 / mic blocked · Hindi not read aloud | Use Chrome/Edge and allow the mic · use Edge, or install a Hindi voice |
+| Hinglish answered in English | Choose **हिन्दी** in the language menu |
+| Chat history gone | Cookies cleared, private window, or another browser |
+| Render never goes **Live** | Check **Logs**: usually a wrong API key → fix it under **Environment** → **Manual Deploy** |
+| Render didn't redeploy | It waits for CI; look for a red ❌ under **Actions** |
+
+</details>
+
+---
+
+<div align="center">
+
+<img src="https://img.shields.io/badge/attending_physician-Himanshu_Kumar-14d6b0?style=flat-square&labelColor=0a1626" alt="Attending physician: Himanshu Kumar"/>
+
+**[github.com/himanshugithub360](https://github.com/himanshugithub360)**
+
+<sub>Signed and discharged in good health. ⚕️ Not medical advice: in an emergency, call 112.</sub>
+
+</div>

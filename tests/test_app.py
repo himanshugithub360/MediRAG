@@ -253,3 +253,25 @@ def test_health_check(client):
 def test_home_page_renders(client):
     page = client.get("/")
     assert page.status_code == 200 and b"Dr. Insight" in page.data
+
+
+def test_lab_values_are_range_checked_in_code():
+    from src.documents import check_ranges
+    text = check_ranges("Haemoglobin          11.2       g/dL     13.0 - 17.0   L\n"
+                        "Creatinine           0.9        mg/dL    0.7 - 1.3\n"
+                        "Total cholesterol    185        mg/dL    < 200\n"
+                        "HbA1c                7.1        %        < 5.7         H\n"
+                        "Vitamin D: 18 ng/mL 30 to 100\n"
+                        "Patient: Demo   Age: 45")
+    lines = text.splitlines()
+    assert lines[0].endswith("[app check: LOW]")
+    assert lines[1].endswith("[app check: within range]")
+    assert lines[2].endswith("[app check: within range]")
+    assert lines[3].endswith("[app check: HIGH]")
+    assert lines[4].endswith("[app check: LOW]")
+    assert "app check" not in lines[5]
+
+
+def test_symptom_check_gets_a_readable_title(client, fake):
+    client.post("/api/symptom-check/stream", json={"symptoms": "runny nose", "red_flags": []}).get_data()
+    assert client.get("/api/conversations").get_json()[0]["title"] == "Symptom check: runny nose"
