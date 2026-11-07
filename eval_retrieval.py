@@ -23,7 +23,7 @@ from langchain_pinecone import PineconeVectorStore
 
 from src.config import FINAL_K, INDEX_NAME, LEGACY_NAMESPACE, NAMESPACE, PROJECT_ROOT
 from src.helper import download_hugging_face_embeddings
-from src.retrieval import build_retriever
+from src.retrieval import HybridRetriever, build_retriever
 
 QUESTIONS_PATH = os.path.join(PROJECT_ROOT, "eval", "questions.json")
 
@@ -67,7 +67,7 @@ def main():
         ("Old: 300-char chunks, vector only", build_retriever(store(LEGACY_NAMESPACE), use_bm25=False, use_reranker=False)),
         ("1000-char chunks, vector only", build_retriever(new_store, use_bm25=False, use_reranker=False)),
         ("+ BM25 keyword search (hybrid)", build_retriever(new_store, use_bm25=True, use_reranker=False)),
-        ("+ cross-encoder reranker (app)", build_retriever(new_store, use_bm25=True, use_reranker=True)),
+        ("+ cross-encoder reranker (app)", HybridRetriever(new_store)),
     ]
 
     results = [evaluate(name, r, questions, FINAL_K, args.verbose) for name, r in setups]

@@ -69,6 +69,24 @@ NORMAL_CASES = [
 ]
 
 
+HINDI_CASES = [
+    ("मेरे पिता को सीने में दर्द हो रहा है", EMERGENCY),
+    ("mere papa ko seene mein dard ho raha hai", EMERGENCY),
+    ("मेरी माँ बेहोश हो गई है", EMERGENCY),
+    ("मुझे सांस नहीं आ रही", EMERGENCY),
+    ("मेरे बेटे ने जहर खा लिया", EMERGENCY),
+    ("मैं आत्महत्या करना चाहता हूँ", CRISIS),
+    ("main marna chahta hoon", CRISIS),
+    ("सीने में दर्द के क्या कारण हैं?", SAFE),     # general question -> answered, with a notice
+    ("मधुमेह के लक्षण क्या हैं?", SAFE),
+]
+
+
+@pytest.mark.parametrize("message,kind", HINDI_CASES)
+def test_hindi_and_hinglish(message, kind):
+    assert check_message(message).kind == kind
+
+
 @pytest.mark.parametrize("message", CRISIS_CASES)
 def test_crisis(message):
     assert check_message(message).kind == CRISIS

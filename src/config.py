@@ -49,3 +49,27 @@ SOURCE_TITLES = {
     "Gale Encyclopedia of Medicine. Vol. 1. 2nd ed.pdf": "Gale Encyclopedia of Medicine, Vol. 1",
     "OpenStax Pharmacology for Nurses.pdf": "OpenStax Pharmacology for Nurses",
 }
+
+# Knowledge collections users can filter by. Every chunk is tagged with one of these keys.
+# PDFs are matched by file name (any Gale volume -> "encyclopedia"); other PDFs -> "other".
+COLLECTIONS = {
+    "encyclopedia": "Gale Encyclopedia of Medicine",
+    "pharmacology": "OpenStax Pharmacology",
+    "medlineplus": "MedlinePlus (NIH)",
+    "who": "WHO fact sheets",
+    "other": "Other PDFs",
+}
+WEB_SOURCES = {   # files in Data/web/ written by fetch_sources.py
+    "medlineplus.jsonl": ("medlineplus", "MedlinePlus"),
+    "who_factsheets.jsonl": ("who", "WHO fact sheet"),
+}
+
+
+def collection_for_file(file_name):
+    name = file_name.lower()
+    if "gale" in name or "encyclopedia" in name:
+        return "encyclopedia"
+    if "pharmacology" in name:
+        return "pharmacology"
+    return "other"
+

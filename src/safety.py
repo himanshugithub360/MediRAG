@@ -137,6 +137,45 @@ PRESCRIPTION_REQUEST = _rx(
 )
 
 
+# ── Hindi / Hinglish backstop ────────────────────────────────────────────────
+# Messages in other languages are also checked after translation to English, but the most
+# urgent phrases are matched directly so they never depend on an AI translation.
+HI_CRISIS = _rx(
+    r"आत्महत्या", r"ख़ुदकुशी|खुदकुशी", r"मरना चाहत[ाी]", r"जीना नहीं चाहत[ाी]", r"(?:ख़ुद|खुद) को मार",
+    r"अपनी जान ले", r"\b(?:atmahatya|aatmahatya|khudkushi|khudkhushi)\b",
+    r"\bmarna chaht[ae]\b", r"\b(?:jeena|jina) nahi chaht[ae]\b", r"\bkhud ko maar",
+)
+HI_EMERGENCY = {
+    "heart": _rx(r"(?:सीने|छाती) में (?:तेज़ |तेज )?दर्द", r"दिल का दौरा", r"हार्ट अटैक",
+                 r"\b(?:seene|sine|chhati|chati) (?:me|mein|main) (?:tez )?dard\b", r"\bdil ka daura\b"),
+    "stroke": _rx(r"लकवा", r"मुँह टेढ़ा|मुंह टेढ़ा", r"\blakwa\b"),
+    "breathing": _rx(r"(?:सांस|साँस) (?:नहीं|लेने में (?:बहुत )?(?:तकलीफ|दिक्कत|परेशानी))",
+                     r"\b(?:saans|sans) (?:nahi|lene me(?:in)? (?:taklif|dikkat))"),
+    "overdose": _rx(r"(?:ज़हर|जहर) (?:खा|पी)", r"बहुत सारी गोलियां खा", r"\b(?:zehar|zahar|jahar) (?:kha|pi)"),
+    "unconscious": _rx(r"बेहोश", r"\bbehosh\b"),
+    "seizure": _rx(r"दौरा पड़", r"मिर्गी का दौरा", r"\b(?:mirgi|daura pad)"),
+    "bleeding": _rx(r"(?:बहुत|लगातार) खून (?:बह|आ)", r"खून की उल्टी", r"\bkhoon (?:beh|bah)"),
+}
+HI_PERSONAL_NOW = _rx(
+    r"मुझे|मेरे|मेरी|मेरा|मैं|हमें|हमारे|उसे|उसको|उन्हें|उनको|पापा|पिता|पिताजी|माँ|मां|मम्मी|बेटा|बेटी|भाई|बहन|"
+    r"पति|पत्नी|दादा|दादी|नाना|नानी|बच्च[ाेी]|दोस्त",
+    r"हो रहा|हो रही|हो गया|हो गई|अभी|अचानक",
+    r"\b(?:mujhe|mere|meri|mera|hume|humein|use|unhe|papa|mummy|maa|beta|beti|bhai|behen|pati|patni|"
+    r"dada|dadi|nana|nani|bachche|bachcha|abhi|achanak|ho raha|ho rahi)\b",
+)
+
+
+def _check_hindi(text):
+    if HI_CRISIS.search(text):
+        return SafetyResult(CRISIS, "mental_health")
+    for category, pattern in HI_EMERGENCY.items():
+        if pattern.search(text):
+            if HI_PERSONAL_NOW.search(text):
+                return SafetyResult(EMERGENCY, category)
+            return SafetyResult(SAFE, category, notice=emergency_notice())
+    return None
+
+
 def normalize(text):
     text = text.lower().replace("’", "'").replace("‘", "'")
     return re.sub(r"\s+", " ", text).strip()
@@ -145,6 +184,9 @@ def normalize(text):
 def check_message(message):
     """Classify a user message. Order matters: crisis > emergency > dosage."""
     text = normalize(message)
+    hindi = _check_hindi(text)
+    if hindi and hindi.kind != SAFE:
+        return hindi
     personal = bool(PERSONAL.search(text))
 
     if CRISIS_PATTERNS.search(text) or (SUICIDE_WORD.search(text) and personal):
@@ -169,7 +211,7 @@ def check_message(message):
     if DOSAGE_REQUEST.search(text) or PRESCRIPTION_REQUEST.search(text):
         return SafetyResult(DOSAGE)
 
-    return SafetyResult(SAFE)
+    return hindi or SafetyResult(SAFE)
 
 
 # ── Messages ─────────────────────────────────────────────────────────────────
@@ -189,6 +231,8 @@ EMERGENCY_ADVICE = {
                "5 minutes or they don't wake up.",
     "bleeding": "Press firmly on the wound with a clean cloth and keep pressing. Raise the injured part "
                 "if possible.",
+    "meningitis": "A high fever with a stiff neck, or a rash that doesn't fade when you press a glass on it, "
+                  "can be signs of meningitis or sepsis, which need hospital treatment within hours.",
     "allergy": "Throat or face swelling can be a severe allergic reaction (anaphylaxis). If they have an "
                "adrenaline (epinephrine) auto-injector, use it now.",
 }
@@ -200,7 +244,7 @@ def emergency_response(category):
         "🚨 **This could be a medical emergency. Please get help right now.**\n\n"
         f"📞 Call **{EMERGENCY_NUMBER}** (emergency) or **{AMBULANCE_NUMBER}** (ambulance), "
         "or go to the nearest hospital emergency department.\n\n"
-        f"{advice}\n\n"
+        + (f"{advice}\n\n" if advice else "") +
         "I'm an AI and can't assess emergencies. Please don't wait for an online answer."
     )
 

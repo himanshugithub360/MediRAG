@@ -2,6 +2,7 @@ flask>=3.0
 flask-limiter>=3.5
 python-dotenv>=1.0
 pypdf>=4.0
+pillow>=10.0
 fonttools>=4.0
 rank_bm25>=0.2
 sentence-transformers>=3.0

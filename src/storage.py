@@ -29,14 +29,32 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id  TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role             TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content          TEXT NOT NULL,
-    sources          TEXT,               -- JSON list of {title, page}
+    sources          TEXT,               -- JSON list of {title, page, url}
     kind             TEXT,               -- emergency / crisis / dosage / low_confidence / ...
     notice           TEXT,
     feedback         INTEGER,            -- 1 = 👍, -1 = 👎, NULL = none
     created_at       REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id  TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    filename         TEXT NOT NULL,
+    kind             TEXT NOT NULL CHECK (kind IN ('pdf', 'image')),
+    path             TEXT NOT NULL,      -- file on disk under instance/uploads/
+    text             TEXT NOT NULL,      -- extracted text, or the AI's description of an image
+    pages            INTEGER,
+    created_at       REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_conversation ON attachments(conversation_id);
 """
+
+
+
+def upload_dir():
+    """Folder for uploaded files, next to the database (instance/uploads/)."""
+    return os.path.join(os.path.dirname(DB_PATH), "uploads")
 
 
 @contextmanager
@@ -53,6 +71,7 @@ def _connect():
 
 def init_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(upload_dir(), exist_ok=True)
     with _connect() as conn:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
@@ -99,8 +118,41 @@ def rename_conversation(user_id, conv_id, title):
 
 def delete_conversation(user_id, conv_id):
     with _connect() as conn:
+        paths = [r["path"] for r in conn.execute(
+            "SELECT a.path FROM attachments a JOIN conversations c ON c.id = a.conversation_id "
+            "WHERE c.id = ? AND c.user_id = ?", (conv_id, user_id))]
         cur = conn.execute("DELETE FROM conversations WHERE id = ? AND user_id = ?", (conv_id, user_id))
+    # Uploaded medical documents are sensitive: remove the files too, not just the rows
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
     return cur.rowcount > 0
+
+
+# ── Attachments (uploaded PDFs and images) ───────────────────────────────────
+def add_attachment(conv_id, filename, kind, path, text, pages=None):
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO attachments (conversation_id, filename, kind, path, text, pages, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (conv_id, filename, kind, path, text, pages, time.time()))
+    return cur.lastrowid
+
+
+def list_attachments(conv_id):
+    with _connect() as conn:
+        rows = conn.execute("SELECT id, filename, kind, path, text, pages, created_at FROM attachments "
+                            "WHERE conversation_id = ? ORDER BY id", (conv_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_attachment(user_id, attachment_id):
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT a.* FROM attachments a JOIN conversations c ON c.id = a.conversation_id "
+            "WHERE a.id = ? AND c.user_id = ?", (attachment_id, user_id)).fetchone()
+    return dict(row) if row else None
 
 
 # ── Messages ─────────────────────────────────────────────────────────────────

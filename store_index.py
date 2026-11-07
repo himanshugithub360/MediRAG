@@ -1,11 +1,12 @@
-"""Build the knowledge base: every PDF in Data/ -> cleaned chunks -> Pinecone + local BM25 copy.
+"""Build the knowledge base: every PDF in Data/ and the web content in Data/web/
+(from fetch_sources.py) -> cleaned chunks -> Pinecone + local BM25 copy.
 
 Run it again whenever you add, remove or change PDFs in Data/. It replaces the
 contents of the Pinecone namespace, so the index always matches the folder.
 """
 from src.config import (CHUNKS_PATH, DATA_DIR, EMBEDDING_MODEL, INDEX_NAME, NAMESPACE)
-from src.helper import (chunk_id, download_hugging_face_embeddings, load_pdf_file, save_chunks,
-                        text_split)
+from src.helper import (chunk_id, download_hugging_face_embeddings, load_pdf_file, load_web_documents,
+                        save_chunks, text_split)
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from collections import Counter
@@ -25,13 +26,25 @@ BATCH_SIZE = 200
 # Load and process documents
 print(f"Loading PDF documents from {DATA_DIR} ...")
 extracted_data = load_pdf_file(data=DATA_DIR)
-if not extracted_data:
-    raise SystemExit(f"No PDF text found in {DATA_DIR}. Put your PDF files there first.")
 for source, pages in Counter(d.metadata["source"] for d in extracted_data).items():
     print(f"  {source}: {pages} pages")
 
+web_docs = load_web_documents(os.path.join(DATA_DIR, "web"))
+for collection, n in Counter(d.metadata["collection"] for d in web_docs).items():
+    print(f"  {collection}: {n} web documents")
+extracted_data += web_docs
+if not extracted_data:
+    raise SystemExit(f"No PDF text found in {DATA_DIR}. Put your PDF files there first.")
+
 print("Splitting text into chunks...")
 text_chunks = text_split(extracted_data)
+# Web pages are split into several chunks; repeat the page title on each so a chunk from
+# the middle of "Diabetes" is still found for diabetes questions.
+for chunk in text_chunks:
+    if chunk.metadata.get("url"):
+        title = chunk.metadata["citation"].split(": ", 1)[-1]
+        if not chunk.page_content.startswith(title):
+            chunk.page_content = f"{title}\n{chunk.page_content}"
 ids = [chunk_id(doc, i) for i, doc in enumerate(text_chunks)]
 print(f"Created {len(text_chunks)} text chunks")
 
