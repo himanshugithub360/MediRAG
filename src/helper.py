@@ -99,6 +99,35 @@ def save_chunks(chunks, ids, path):
                                ensure_ascii=False) + "\n")
 
 
+def export_chunks_from_pinecone(index, namespace, path, log=print):
+    """Rebuild the local chunk file (for keyword search) from the text stored in Pinecone.
+
+    Used on servers that don't have Data/ or artifacts/ (e.g. a Hugging Face Space): the
+    vectors' metadata already holds each chunk's text, so nothing else has to be uploaded.
+    """
+    rows, ids_seen = [], 0
+    for id_batch in index.list(namespace=namespace, limit=100):
+        ids = list(id_batch)
+        ids_seen += len(ids)
+        fetched = index.fetch(ids=ids, namespace=namespace).vectors
+        for vec_id, vec in fetched.items():
+            metadata = dict(vec.metadata or {})
+            text = metadata.pop("text", "")
+            if text:
+                rows.append({"id": vec_id, "text": text, "metadata": metadata})
+        if ids_seen % 2000 < 100:
+            log(f"  downloaded {ids_seen} chunks from Pinecone...")
+    if not rows:
+        raise RuntimeError(f"Pinecone namespace '{namespace}' has no chunks. Run store_index.py first.")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    os.replace(tmp, path)
+    return len(rows)
+
+
 def load_chunks(path):
     docs = []
     with open(path, encoding="utf-8") as f:

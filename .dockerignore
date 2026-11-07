@@ -1,0 +1,23 @@
+# Secrets and local runtime data never go into the image
+.env
+.env.*
+instance/
+artifacts/
+Data/
+
+# Development files
+.venv/
+venv/
+.git/
+.github/
+.claude/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+research/
+tests/
+eval/
+eval_retrieval.py
+template.py
+deploy/

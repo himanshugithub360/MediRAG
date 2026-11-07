@@ -22,8 +22,10 @@ You can also **upload a lab report, prescription or photo** and ask about it, ch
 10. [Configuration reference](#configuration-reference)
 11. [API reference](#api-reference)
 12. [Running the tests](#running-the-tests)
-13. [Troubleshooting](#troubleshooting)
-14. [Customisation ideas](#customisation-ideas)
+13. [Docker](#docker)
+14. [Free deployment (Hugging Face Spaces)](#free-deployment-hugging-face-spaces)
+15. [Troubleshooting](#troubleshooting)
+16. [Customisation ideas](#customisation-ideas)
 
 ---
 
@@ -50,6 +52,7 @@ You can also **upload a lab report, prescription or photo** and ask about it, ch
 - 💊 **No personal dosing or prescribing**: requests like *"how much paracetamol should I take?"* are politely declined
 - 🙅 **Won't guess**: if the books have nothing relevant, the bot says so instead of making something up
 - ⏳ **Rate limiting**: protects the app and keeps Mistral's free-tier limit from being hit
+- 🐳 **Docker + free public deployment** on Hugging Face Spaces, with **GitHub Actions** running the tests on every push
 - 📏 **Built-in retrieval evaluation** (`eval_retrieval.py`) to measure changes with numbers
 - 🧠 Conversation memory: follow-ups like *"what are its treatments?"* are understood in context
 - ⚡ Instant replies for greetings like "hi", "thanks", "bye" (no API call needed)
@@ -102,14 +105,23 @@ You can also **upload a lab report, prescription or photo** and ask about it, ch
 
 ```
 AI Medical-chatbot/
-├── app.py               # Flask web app: RAG pipeline, streaming chat, conversation + feedback APIs
+├── app.py               # Flask web app: RAG pipeline, streaming chat, uploads, conversation + feedback APIs
+├── serve.py             # Production server (waitress) for Windows/macOS/Linux
+├── wsgi.py              # Entry point for gunicorn (used in Docker)
+├── Dockerfile           # Production image (gunicorn, CPU-only PyTorch, models baked in)
+├── .dockerignore        # Keeps .env, Data/, chat history etc. out of the image
+├── .github/workflows/
+│   └── ci.yml           # Tests on every push, Docker build check, deploy to Hugging Face
+├── deploy/
+│   ├── deploy_to_hf.py  # Uploads the app to a Hugging Face Space
+│   └── huggingface/README.md  # The Space's settings + description
 ├── fetch_sources.py     # Downloads MedlinePlus topics + WHO fact sheets into Data/web/
 ├── store_index.py       # Builds the knowledge base: PDFs + web content → chunks → Pinecone + local copy
 ├── eval_retrieval.py    # Measures retrieval quality (Hit@5, MRR) for different setups
 ├── eval/
 │   └── questions.json   # Test questions + keywords used by eval_retrieval.py
 ├── src/
-│   ├── config.py        # Shared settings: index, namespace, chunk size, models, k values
+│   ├── config.py        # ALL settings in one place (reads .env)
 │   ├── helper.py        # PDF loading + cleaning, chunking, embeddings, chunk file I/O
 │   ├── retrieval.py     # Hybrid search (vector + BM25) and cross-encoder reranking
 │   ├── safety.py        # Emergency, crisis and dosage detection + their responses
@@ -117,8 +129,9 @@ AI Medical-chatbot/
 │   ├── documents.py     # Reading uploaded PDFs/photos (pypdf + vision model)
 │   ├── languages.py     # Supported languages + script-based language detection
 │   ├── launcher.py      # Opens the chat in the default browser, Chrome or Edge
-│   └── prompt.py        # Alternative/basic system prompt (not used by app.py)
 ├── tests/
+│   ├── conftest.py      # Fake AI services so tests need no keys or network
+│   ├── test_app.py      # 27 API tests: /chat, streaming, greetings, errors, uploads, ...
 │   ├── test_safety.py   # 58 tests for the safety rules (English, Hindi, Hinglish)
 │   ├── test_storage.py  # 6 tests for saved chats and feedback
 │   └── test_languages.py # 3 tests for language detection
@@ -338,6 +351,16 @@ Running without activating the venv (Windows):
 .venv/Scripts/python app.py
 ```
 
+### Production server
+
+`python app.py` uses Flask's development server, which is fine for trying things out but isn't built for real traffic. For a long-running or shared setup, use the production server instead (waitress; works on Windows, macOS and Linux):
+
+```bash
+python serve.py
+```
+
+It loads the models first, then serves on `HOST`:`PORT` from `.env` (default `127.0.0.1:8080`) with 8 threads, so several people can chat at once and answers still stream word by word. It doesn't open a browser. Inside Docker the app runs under **gunicorn** instead (see [Docker](#docker)).
+
 ## Using the chatbot
 
 - Type a medical question (for example, *"What are the symptoms of diabetes?"*) and press **Enter**, or click a suggested question. **Shift + Enter** adds a new line.
@@ -438,7 +461,12 @@ On phones, the helpline numbers are tappable links that start a call.
 | `MISTRAL_MODEL`     | ❌       | `open-mistral-nemo` | Which Mistral model answers questions |
 | `PORT`              | ❌       | `8080`              | Port the web server listens on |
 | `HOST`              | ❌       | `127.0.0.1`         | Address to listen on. Use `0.0.0.0` to allow other devices on your network (ignored while debug mode is on) |
-| `FLASK_DEBUG`       | ❌       | off                 | `1` enables auto-reload and the debugger. Never enable it on a network-visible server |
+| `FLASK_DEBUG`       | ❌       | off                 | `1` enables auto-reload and the debugger (dev server only). Never enable it on a network-visible server |
+| `TRUST_PROXY`       | ❌       | off                 | `1` behind a hosting proxy (Hugging Face, Render…) so rate limits use each visitor's real IP |
+| `CROSS_SITE_COOKIES` | ❌      | off                 | `1` when the app is shown inside another site's iframe over HTTPS (the Hugging Face Space page) |
+| `CHUNKS_FROM_PINECONE` | ❌    | on                  | If `artifacts/chunks.jsonl` is missing, rebuild it from Pinecone at startup (needed on servers) |
+| `INSTANCE_DIR` / `CHAT_DB_PATH` | ❌ | `instance/`, `instance/medirag.db` | Where chat history, uploads and the secret key are stored |
+| `MAX_UPLOAD_MB`     | ❌       | `10`                | Largest file users can upload |
 | `OPEN_BROWSER`      | ❌       | `default`           | Browser to open on startup: `default`, `chrome`, `edge` or `none` |
 | `EMERGENCY_NUMBER`  | ❌       | `112`               | Emergency number shown in emergency and crisis replies |
 | `AMBULANCE_NUMBER`  | ❌       | `108`               | Ambulance number shown in emergency replies |
@@ -453,6 +481,8 @@ On phones, the helpline numbers are tappable links that start a call.
 
 ### Values in code you may want to tweak
 
+Every setting lives in [`src/config.py`](src/config.py); the ones marked *(env)* there can also be set in `.env`.
+
 | Setting | File | Default |
 |---------|------|---------|
 | Pinecone index name | `src/config.py` (`INDEX_NAME`) | `medichatbot` |
@@ -463,7 +493,7 @@ On phones, the helpline numbers are tappable links that start a call.
 | Book titles shown in sources | `src/config.py` (`SOURCE_TITLES`) | Gale, OpenStax Pharmacology |
 | LLM temperature | `app.py` | `0.2` |
 | Chunk size / overlap (rerun `store_index.py` after changing) | `src/config.py` (`CHUNK_SIZE`, `CHUNK_OVERLAP`) | `1000` / `150` characters |
-| Chat history length sent to the LLM | `app.py` (`MAX_HISTORY_MESSAGES`) | last 8 messages |
+| Chat history length sent to the LLM | `src/config.py` (`MAX_HISTORY_MESSAGES`) | last 8 messages |
 | Quick replies for greetings | `app.py` (`QUICK_RESPONSES`, `GREETING_ALIASES`) | hi, hello, thanks, bye, … |
 | System prompt / persona | `app.py` (`system_prompt`) | "Dr. Insight" |
 
@@ -540,13 +570,14 @@ curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "
 
 ## Running the tests
 
-There are 67 automated tests:
+There are 94 automated tests:
 
+- **27 API tests** for the Flask app: `/chat` and streaming answers, greeting logic, follow-up rewriting, Hindi translation, source filter, safety paths, **error handling** (LLM failure, Mistral 429 retry, rate limit, empty and malformed requests), symptom checker, PDF and image uploads, privacy between users, feedback and the health check. The AI parts are replaced by fakes (`tests/conftest.py`), so they run in seconds without API keys, model downloads or network.
 - **58 for the safety rules**: emergencies, crises, dosage requests, general questions that should only get a notice, normal questions that must pass through untouched, and Hindi/Hinglish emergency phrases.
 - **6 for saved chats**: titles, privacy between users, message order, feedback rules and deletion.
 - **3 for language detection**: the 8 Indian scripts, English/Hinglish, and explicit language choice.
 
-They need no API keys and run in about a second:
+They need no API keys and run in about 5 seconds:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -556,6 +587,73 @@ python -m pytest -q
 ```
 
 When you change a rule in `src/safety.py`, add the message that prompted the change to `tests/test_safety.py`.
+
+### Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every push and pull request (free on public GitHub repos):
+
+1. **Tests**: installs the dependencies (CPU-only PyTorch) and runs `pytest`
+2. **Docker image builds**: checks the `Dockerfile` still builds (not pushed anywhere)
+3. **Deploy**: on pushes to `main`, uploads the app to your Hugging Face Space, *only if* you've set it up (see [Free deployment](#free-deployment-hugging-face-spaces)); otherwise it's skipped with a notice
+
+See the results under the repo's **Actions** tab. A green ✅ next to a commit means all of the above passed.
+
+## Docker
+
+The [`Dockerfile`](Dockerfile) builds a production image: Python 3.12, CPU-only PyTorch, the embedding and reranker models baked in, and **gunicorn** (1 worker × 8 threads, so the models are loaded once) serving on port 7860. API keys are **not** in the image; you pass them when starting it.
+
+```bash
+docker build -t medirag .
+```
+```bash
+docker run --rm --env-file .env -p 7860:7860 medirag
+```
+
+Then open <http://localhost:7860>. On the first start the container downloads the keyword-search index from Pinecone (about 3 minutes); `GET /healthz` returns `{"status": "ok"}` once it's ready. Chat history lives inside the container and is lost when it's removed; add `-v medirag-data:/app/instance` to keep it.
+
+## Free deployment (Hugging Face Spaces)
+
+A public demo link for your portfolio, **free**: Hugging Face Spaces' free CPU tier (2 vCPU, 16 GB RAM) runs the Docker image as is. (Render's free tier has 512 MB of RAM, too little for the AI models, and Railway no longer has a free tier.) Pinecone and Mistral stay on their free tiers too.
+
+**One-time setup (about 10 minutes, no credit card):**
+
+1. **Create a free Hugging Face account** at <https://huggingface.co/join>.
+2. **Create an access token**: <https://huggingface.co/settings/tokens> → *Create new token* → type **Write** → copy it (starts with `hf_`).
+3. **Add secrets to the GitHub repo**: on GitHub open *Settings → Secrets and variables → Actions*.
+   - Tab **Secrets** → *New repository secret*, add these four:
+
+     | Name | Value |
+     |------|-------|
+     | `HF_TOKEN` | the Hugging Face token from step 2 |
+     | `PINECONE_API_KEY` | same as in your `.env` |
+     | `MISTRAL_API_KEY` | same as in your `.env` |
+     | `FLASK_SECRET_KEY` | a long random string, e.g. from `python -c "import secrets; print(secrets.token_hex(32))"` |
+
+   - Tab **Variables** → *New repository variable*: `HF_SPACE_ID` = `your-hf-username/medirag`
+4. **Deploy**: push any commit to `main`, or open the *Actions* tab → *CI* → *Run workflow*. When the **Deploy** job finishes, the Space builds the image (about 5–10 minutes the first time).
+
+Your app is then live at:
+- **Space page:** `https://huggingface.co/spaces/your-hf-username/medirag`
+- **Direct link (recommended to share):** `https://your-hf-username-medirag.hf.space`
+
+From then on, **every push to `main` that passes the tests redeploys automatically**.
+
+The workflow creates the Space, stores the keys as Space **secrets** (never visible in the Space's files), sets `TRUST_PROXY` and `CROSS_SITE_COOKIES`, and uploads only the files the app needs (never `.env`, `Data/` or chat history). The book PDFs aren't uploaded either: the server rebuilds its keyword index from the text already in your Pinecone index.
+
+You can also deploy from your own computer instead of GitHub Actions:
+```bash
+pip install huggingface_hub
+```
+```bash
+set HF_TOKEN=hf_your_token&& set HF_SPACE_ID=your-hf-username/medirag&& python deploy/deploy_to_hf.py
+```
+(Then add `PINECONE_API_KEY`, `MISTRAL_API_KEY` and `FLASK_SECRET_KEY` under the Space's *Settings → Variables and secrets*, or set them in the same command.)
+
+**Limits of the free tier, good to know:**
+- The Space **sleeps after 48 hours without visitors**. The next visit wakes it up, which takes a few minutes (it reloads the models and the keyword index).
+- Its disk is temporary: **saved chats and uploads are cleared whenever the Space restarts**. Fine for a demo; don't rely on it for anything important.
+- Everyone using the demo shares your **Mistral free-tier quota**. The per-visitor rate limit (10 messages/minute, 100/day) protects it; lower `CHAT_RATE_LIMIT` in the Space's variables if needed.
+- The Space and your GitHub repo are public, but your keys stay private as secrets.
 
 ## Troubleshooting
 
@@ -588,6 +686,10 @@ When you change a rule in `src/safety.py`, add the message that prompted the cha
 | *"Couldn't find any readable text in that PDF"* | The PDF is scanned and the vision model couldn't read it. Upload a clearer photo of the page instead. |
 | Uploading a photo gives a 429 / rate-limit message | Image reading uses a Mistral vision call; the free tier is limited. Wait a minute. |
 | MedlinePlus / WHO sources never appear | Run `python fetch_sources.py`, then `python store_index.py`. |
+| GitHub Actions **Deploy** job says *"Skipping deploy"* | Add the `HF_TOKEN` secret and `HF_SPACE_ID` variable (see [Free deployment](#free-deployment-hugging-face-spaces)). |
+| The Space shows *"Runtime error"* | Open the Space's **Logs** tab. Usually a missing `PINECONE_API_KEY` / `MISTRAL_API_KEY` secret; add it in the Space settings and click *Restart*. |
+| The Space page keeps forgetting my chats | Your browser blocks cookies inside the embedded page. Use the direct `https://…hf.space` link instead. |
+| `docker: ... daemon is not running` | Start Docker Desktop and wait until it says *Engine running*. |
 | Install fails on Python 3.13/3.14 | Some packages lack wheels for very new Python versions. Use Python 3.12. |
 
 ## Customisation ideas
@@ -596,7 +698,7 @@ When you change a rule in `src/safety.py`, add the message that prompted the cha
 - **Change the persona:** edit `system_prompt` in `app.py`.
 - **Use a different LLM:** swap `ChatMistralAI` for another LangChain chat model (OpenAI, Anthropic, Groq, a local Ollama model, ...).
 - **Tune retrieval:** change chunk size, `FINAL_K` or `VECTOR_WEIGHT` in `src/config.py`, rebuild, then rerun `eval_retrieval.py` to see whether it helped. Add your own questions to `eval/questions.json`.
-- **Deploy:** run behind a production WSGI server (e.g. `waitress` on Windows, `gunicorn` on Linux) (keep `FLASK_DEBUG` off).
+- **Keep chats on the hosted demo:** Hugging Face offers paid persistent storage; or point `CHAT_DB_PATH` at a mounted volume when self-hosting with Docker.
 
 ---
 

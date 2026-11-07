@@ -13,11 +13,9 @@ import uuid
 from pypdf import PdfReader
 
 from src import storage
+from src.config import MAX_PDF_PAGES, MAX_SCANNED_PAGES, MAX_UPLOAD_MB
+from src.config import MAX_UPLOAD_TEXT_CHARS as MAX_TEXT_CHARS
 
-MAX_UPLOAD_MB = 10
-MAX_PDF_PAGES = 40
-MAX_SCANNED_PAGES = 4          # scanned pages sent to the vision model (each is one API call)
-MAX_TEXT_CHARS = 60000
 IMAGE_TYPES = {"png", "jpg", "jpeg", "webp"}
 
 VISION_PROMPT = (

@@ -1,23 +1,18 @@
 from flask import (Flask, Response, abort, jsonify, render_template, request, send_file, session,
                    stream_with_context)
-from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
-from langchain_pinecone import PineconeVectorStore
-from langchain_mistralai import ChatMistralAI
-from dotenv import load_dotenv
 from datetime import timedelta
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from src.config import (CHAT_RATE_LIMIT, COLLECTIONS, INDEX_NAME, MIN_RELEVANCE_SCORE,
-                        MISTRAL_MIN_INTERVAL, NAMESPACE, PROJECT_ROOT)
-from src.documents import IMAGE_NOTICE, MAX_UPLOAD_MB, UploadError, process_upload, relevant_upload_context
-from src.helper import download_hugging_face_embeddings
+from werkzeug.middleware.proxy_fix import ProxyFix
+from src import config, safety, storage
+from src.config import (CHAT_RATE_LIMIT, COLLECTIONS, MAX_HISTORY_MESSAGES, MAX_UPLOAD_MB,
+                        MIN_RELEVANCE_SCORE, MISTRAL_MIN_INTERVAL, UPLOAD_RATE_LIMIT)
+from src.documents import IMAGE_NOTICE, UploadError, process_upload, relevant_upload_context
 from src.languages import language_name, public_list as language_list, resolve_language
-from src.retrieval import HybridRetriever
-from src import safety, storage
 import json
+import logging
 import os
 import re
 import secrets
@@ -27,41 +22,36 @@ import uuid
 
 # Serve /static files at the site root too, so /favicon-32x32.png etc. resolve
 app = Flask(__name__, static_folder='static', static_url_path='')
-load_dotenv()
-
-PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY')
-MISTRAL_API_KEY = os.environ.get('MISTRAL_API_KEY')
-
-missing = [k for k, v in {'PINECONE_API_KEY': PINECONE_API_KEY, 'MISTRAL_API_KEY': MISTRAL_API_KEY}.items() if not v]
-if missing:
-    raise SystemExit(f"Missing environment variables: {', '.join(missing)}. Add them to your .env file.")
-
-os.environ["PINECONE_API_KEY"] = PINECONE_API_KEY
-os.environ["MISTRAL_API_KEY"] = MISTRAL_API_KEY
+app.logger.setLevel(logging.INFO)
 
 
 def _load_secret_key():
     """Use FLASK_SECRET_KEY, or a random key saved in instance/ so that users keep
     access to their saved chats across server restarts."""
-    if os.environ.get("FLASK_SECRET_KEY"):
-        return os.environ["FLASK_SECRET_KEY"]
-    path = os.path.join(PROJECT_ROOT, "instance", "secret_key")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    if not os.path.exists(path):
-        with open(path, "w") as f:
+    if config.FLASK_SECRET_KEY:
+        return config.FLASK_SECRET_KEY
+    os.makedirs(os.path.dirname(config.SECRET_KEY_PATH), exist_ok=True)
+    if not os.path.exists(config.SECRET_KEY_PATH):
+        with open(config.SECRET_KEY_PATH, "w") as f:
             f.write(secrets.token_hex(32))
-    with open(path) as f:
+    with open(config.SECRET_KEY_PATH) as f:
         return f.read().strip()
 
 
 app.secret_key = _load_secret_key()
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 app.config["MAX_CONTENT_LENGTH"] = (MAX_UPLOAD_MB + 1) * 1024 * 1024
+if config.CROSS_SITE_COOKIES:
+    # The Hugging Face Space page shows the app in an iframe from another site (*.hf.space)
+    app.config.update(SESSION_COOKIE_SAMESITE="None", SESSION_COOKIE_SECURE=True,
+                      SESSION_COOKIE_PARTITIONED=True)
+if config.TRUST_PROXY:
+    # Use the visitor's real IP (from X-Forwarded-For) for rate limits behind a hosting proxy
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 storage.init_db()
 
 # Per-visitor rate limit on chat endpoints (in memory; resets when the server restarts)
 limiter = Limiter(get_remote_address, app=app, storage_uri="memory://")
-UPLOAD_RATE_LIMIT = os.environ.get("UPLOAD_RATE_LIMIT", "5 per minute;30 per day")
 
 
 @app.errorhandler(429)
@@ -77,25 +67,12 @@ def too_large(e):
     return jsonify({"error": f"Files can be at most {MAX_UPLOAD_MB} MB."}), 413
 
 
-# ── Models ───────────────────────────────────────────────────────────────────
-embeddings = download_hugging_face_embeddings()
-
-# Namespace and index come from src/config.py, shared with store_index.py
-docsearch = PineconeVectorStore.from_existing_index(index_name=INDEX_NAME, embedding=embeddings,
-                                                    namespace=NAMESPACE)
-
-# Vector search + BM25 keyword search, fused and reranked (see src/retrieval.py)
-retriever = HybridRetriever(docsearch)
-
-llm = ChatMistralAI(
-    # Override via MISTRAL_MODEL in .env (e.g. mistral-large-latest on a paid tier)
-    model=os.environ.get("MISTRAL_MODEL", "open-mistral-nemo"),
-    temperature=0.2,
-    api_key=MISTRAL_API_KEY,
-)
-# Reads uploaded photos and scanned documents
-vision_llm = ChatMistralAI(model=os.environ.get("MISTRAL_VISION_MODEL", "pixtral-12b-2409"),
-                           temperature=0.1, api_key=MISTRAL_API_KEY)
+@app.route("/healthz")
+def healthz():
+    """Health check for hosting platforms: 200 once the models are loaded, 503 while starting."""
+    if _services is not None:
+        return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "starting"}), 503
 
 
 # ── Prompts ──────────────────────────────────────────────────────────────────
@@ -185,15 +162,70 @@ symptom_prompt = ChatPromptTemplate.from_messages([
 
 # Label each passage with its source so the model knows where facts come from
 document_prompt = PromptTemplate.from_template("[{citation}]\n{page_content}")
-question_answer_chain = create_stuff_documents_chain(llm, answer_prompt, document_prompt=document_prompt)
-symptom_chain = create_stuff_documents_chain(llm, symptom_prompt, document_prompt=document_prompt)
-contextualize_chain = contextualize_prompt | llm | StrOutputParser()
-translate_chain = translate_prompt | llm | StrOutputParser()
 
-MAX_HISTORY_MESSAGES = 8      # recent messages sent to the LLM as context
 FALLBACK_ANSWER = ("I don't have enough information to answer that accurately. Could you rephrase, "
                    "or consult a healthcare professional for this concern?")
 ERROR_ANSWER = "I'm having trouble processing that request. Please try again."
+
+
+# ── Models and chains (loaded once, on first use) ────────────────────────────
+class Services:
+    """Everything that needs API keys, model downloads or network access. Built lazily so
+    that tests (and the health check) work without them; tests replace it with fakes."""
+
+    def __init__(self):
+        from langchain.chains.combine_documents import create_stuff_documents_chain
+        from langchain_core.output_parsers import StrOutputParser
+        from langchain_mistralai import ChatMistralAI
+        from langchain_pinecone import PineconeVectorStore
+        from pinecone import Pinecone
+        from src.helper import download_hugging_face_embeddings, export_chunks_from_pinecone
+        from src.retrieval import HybridRetriever
+
+        missing = [k for k in ("PINECONE_API_KEY", "MISTRAL_API_KEY") if not getattr(config, k)]
+        if missing:
+            raise RuntimeError(f"Missing environment variables: {', '.join(missing)}. "
+                               "Add them to your .env file (or as secrets on your hosting platform).")
+        os.environ["PINECONE_API_KEY"] = config.PINECONE_API_KEY
+
+        # Keyword search needs a local copy of the chunks; rebuild it from Pinecone if missing
+        if not os.path.exists(config.CHUNKS_PATH) and config.CHUNKS_FROM_PINECONE:
+            app.logger.info("No %s; downloading chunks from Pinecone (takes a few minutes)...",
+                            config.CHUNKS_PATH)
+            index = Pinecone(api_key=config.PINECONE_API_KEY).Index(config.INDEX_NAME)
+            count = export_chunks_from_pinecone(index, config.NAMESPACE, config.CHUNKS_PATH,
+                                                log=app.logger.info)
+            app.logger.info("Saved %d chunks for keyword search.", count)
+
+        embeddings = download_hugging_face_embeddings()
+        store = PineconeVectorStore.from_existing_index(index_name=config.INDEX_NAME, embedding=embeddings,
+                                                        namespace=config.NAMESPACE)
+        # Vector search + BM25 keyword search, fused and reranked (see src/retrieval.py)
+        self.retriever = HybridRetriever(store)
+
+        llm = ChatMistralAI(model=config.MISTRAL_MODEL, temperature=config.LLM_TEMPERATURE,
+                            api_key=config.MISTRAL_API_KEY)
+        # Reads uploaded photos and scanned documents
+        self.vision_llm = ChatMistralAI(model=config.MISTRAL_VISION_MODEL, temperature=0.1,
+                                        api_key=config.MISTRAL_API_KEY)
+        self.qa_chain = create_stuff_documents_chain(llm, answer_prompt, document_prompt=document_prompt)
+        self.symptom_chain = create_stuff_documents_chain(llm, symptom_prompt, document_prompt=document_prompt)
+        self.contextualize_chain = contextualize_prompt | llm | StrOutputParser()
+        self.translate_chain = translate_prompt | llm | StrOutputParser()
+
+
+_services = None
+_services_lock = threading.Lock()
+
+
+def services():
+    """The shared Services instance, created on first use."""
+    global _services
+    if _services is None:
+        with _services_lock:
+            if _services is None:
+                _services = Services()
+    return _services
 
 
 # ── Mistral call pacing ──────────────────────────────────────────────────────
@@ -250,7 +282,7 @@ def describe_image(image_b64, instructions):
         {"type": "text", "text": instructions},
         {"type": "image_url", "image_url": f"data:image/jpeg;base64,{image_b64}"},
     ])
-    return invoke_with_retry(vision_llm, [message]).content
+    return invoke_with_retry(services().vision_llm, [message]).content
 
 
 def localize(text, lang):
@@ -258,7 +290,7 @@ def localize(text, lang):
     if lang == "en":
         return text
     try:
-        return invoke_with_retry(translate_chain, {"language": language_name(lang), "text": text}).strip() or text
+        return invoke_with_retry(services().translate_chain, {"language": language_name(lang), "text": text}).strip() or text
     except Exception as e:
         app.logger.warning("Translation to %s failed: %s", lang, e)
         return text
@@ -358,6 +390,7 @@ def answer_events(conversation_id, user_message, language="auto", collections=No
     Events: "token" {"text"} for each piece of the answer, then "done" with the saved
     assistant message, or "error". symptom is the symptom-check form (dict) in that mode.
     """
+    svc = services()
     history = to_langchain_history(storage.get_messages(conversation_id, limit=MAX_HISTORY_MESSAGES))
     storage.add_message(conversation_id, "user", user_message)
     text_for_language = symptom["symptoms"] if symptom else user_message
@@ -388,7 +421,7 @@ def answer_events(conversation_id, user_message, language="auto", collections=No
         translation = original_text
         if check.kind in (safety.SAFE,) and (lang != "en" or (history and not symptom)):
             try:
-                output = invoke_with_retry(contextualize_chain, {
+                output = invoke_with_retry(svc.contextualize_chain, {
                     "input": english, "chat_history": [] if symptom else history})
                 translation, english = parse_rewrite(output, english)
             except Exception as e:
@@ -425,8 +458,8 @@ def answer_events(conversation_id, user_message, language="auto", collections=No
             return
 
         # 4. Search the reference sources (optionally only some collections)
-        docs = retriever.retrieve(english, collections=collections)
-        uploads = relevant_upload_context(attachments, english, retriever.score)
+        docs = svc.retriever.retrieve(english, collections=collections)
+        uploads = relevant_upload_context(attachments, english, svc.retriever.score)
 
         # 5. Don't let the model guess when nothing relevant was found
         best_score = docs[0].metadata.get("relevance_score") if docs else None
@@ -441,7 +474,7 @@ def answer_events(conversation_id, user_message, language="auto", collections=No
             notice = localize(notice, lang)
 
         # 6. Stream the answer from the LLM
-        chain = symptom_chain if symptom else question_answer_chain
+        chain = svc.symptom_chain if symptom else svc.qa_chain
         for chunk in stream_with_retry(chain, {
                 "input": english if symptom else user_message, "chat_history": [] if symptom else history,
                 "context": docs, "uploads": uploads or "(none)", "language": language_name(lang)}):
@@ -692,12 +725,12 @@ def feedback_summary():
 
 
 if __name__ == '__main__':
+    # Development server (auto-opens a browser). For production use serve.py or gunicorn.
     import argparse
     from src.launcher import BROWSER_CHOICES, open_browser_when_ready
 
-    parser = argparse.ArgumentParser(description="Run the Dr. Insight medical chatbot.")
-    parser.add_argument("--browser", choices=BROWSER_CHOICES,
-                        default=os.environ.get("OPEN_BROWSER", "default").lower(),
+    parser = argparse.ArgumentParser(description="Run the Dr. Insight medical chatbot (development server).")
+    parser.add_argument("--browser", choices=BROWSER_CHOICES, default=config.OPEN_BROWSER,
                         help="Browser to open on startup (default: your system's default browser; "
                              "'none' to not open one). Can also be set with OPEN_BROWSER in .env.")
     args = parser.parse_args()
@@ -706,12 +739,15 @@ if __name__ == '__main__':
 
     # Debug mode is opt-in: Werkzeug's debugger lets anyone who can reach it run code
     # on this machine, so it must never be combined with a network-visible host.
-    debug = os.environ.get("FLASK_DEBUG", "").lower() in ("1", "true", "yes")
-    host = os.environ.get("HOST", "127.0.0.1")
+    debug, host, port = config.FLASK_DEBUG, config.HOST, config.PORT
     if debug and host not in ("127.0.0.1", "localhost"):
         print(f"FLASK_DEBUG is on, so binding to 127.0.0.1 instead of {host} for safety.")
         host = "127.0.0.1"
-    port = int(os.environ.get("PORT", 8080))
+
+    try:
+        services()   # load models now, so the first visitor doesn't wait (and missing keys fail fast)
+    except RuntimeError as e:
+        raise SystemExit(str(e))
 
     # With debug's auto-reloader the script runs twice; only open from the parent process.
     if args.browser != "none" and os.environ.get("WERKZEUG_RUN_MAIN") != "true":

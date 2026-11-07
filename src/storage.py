@@ -10,9 +10,9 @@ import time
 import uuid
 from contextlib import contextmanager
 
-from src.config import PROJECT_ROOT
+from src import config
 
-DB_PATH = os.environ.get("CHAT_DB_PATH", os.path.join(PROJECT_ROOT, "instance", "medirag.db"))
+DB_PATH = config.DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (

@@ -1,5 +1,7 @@
 flask>=3.0
 flask-limiter>=3.5
+waitress>=3.0
+gunicorn>=22.0; sys_platform != "win32"
 python-dotenv>=1.0
 pypdf>=4.0
 pillow>=10.0
