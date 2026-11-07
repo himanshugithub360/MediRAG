@@ -1,5 +1,5 @@
-from flask import (Flask, Response, abort, jsonify, render_template, request, send_file, session,
-                   stream_with_context)
+from flask import (Flask, Response, abort, jsonify, redirect, render_template, request, send_file, session,
+                   stream_with_context, url_for)
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from datetime import timedelta
@@ -575,6 +575,14 @@ def _stream_response(conv, title_text, events):
 # ── Pages ────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
+    """Landing page. Old chat links of the form /?c=<id> go to the app."""
+    if request.args.get("c"):
+        return redirect(url_for("chat_page", c=request.args["c"]))
+    return render_template("landing.html")
+
+
+@app.route("/app")
+def chat_page():
     current_user_id()
     return render_template('chat.html', languages=language_list(),
                            collections=[{"key": k, "name": v} for k, v in COLLECTIONS.items() if k != "other"],

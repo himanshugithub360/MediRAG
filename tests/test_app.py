@@ -250,9 +250,22 @@ def test_health_check(client):
     assert client.get("/healthz").get_json() == {"status": "ok"}
 
 
-def test_home_page_renders(client):
+def test_landing_page_links_to_the_app(client):
     page = client.get("/")
-    assert page.status_code == 200 and b"Dr. Insight" in page.data
+    assert page.status_code == 200 and b"Trust the" in page.data
+    assert b'href="/app"' in page.data
+
+
+def test_chat_page_renders_with_all_controls(client):
+    page = client.get("/app")
+    assert page.status_code == 200
+    for needle in (b"Ask a medical question", b"sourceSelect", b"langSelect", b"scDialog", b'href="/"'):
+        assert needle in page.data
+
+
+def test_old_chat_links_redirect_to_the_app(client):
+    response = client.get("/?c=abc123")
+    assert response.status_code == 302 and response.headers["Location"] == "/app?c=abc123"
 
 
 def test_lab_values_are_range_checked_in_code():

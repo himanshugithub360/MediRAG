@@ -10,65 +10,67 @@
   <link rel="manifest" href="/site.webmanifest" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
   <script>
     // Apply the saved theme before first paint (no flash)
     try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
   </script>
   <style>
-    /* ── Theme tokens ─────────────────────────────────────────────── */
+    /* ── Theme tokens: Ink & Crimson ──────────────────────────────── */
     :root {
       color-scheme: dark;
-      --bg: #07111f;
-      --sidebar: #081526;
-      --surface: #0e1f35;
-      --surface-2: #132945;
-      --hover: rgba(148, 190, 230, 0.08);
-      --border: rgba(148, 180, 210, 0.14);
-      --border-strong: rgba(148, 180, 210, 0.26);
-      --text: #e6f0f6;
-      --text-dim: #8ea3b6;
-      --accent: #14d6b0;
-      --accent-strong: #0fbf9d;
-      --accent-soft: rgba(20, 214, 176, 0.12);
-      --accent-contrast: #032b23;
-      --user-bubble: linear-gradient(135deg, #1265d6, #1e8cff);
-      --danger: #ff6159;
-      --danger-soft: rgba(255, 97, 89, 0.12);
+      --bg: #0b0b0c;
+      --sidebar: #0f0f11;
+      --surface: #161618;
+      --surface-2: #1e1e21;
+      --hover: rgba(243, 238, 228, 0.06);
+      --border: rgba(243, 238, 228, 0.1);
+      --border-strong: rgba(243, 238, 228, 0.2);
+      --text: #f3eee4;
+      --text-dim: #8f897d;
+      --accent: #ff2d3b;
+      --accent-strong: #e01f2d;
+      --accent-soft: rgba(255, 45, 59, 0.13);
+      --accent-contrast: #ffffff;
+      --user-bubble: #ff2d3b;
+      --user-text: #ffffff;
+      --flood: #f3eee4;
+      --danger: #ff6b5e;
+      --danger-soft: rgba(255, 107, 94, 0.12);
       --warn: #ffb547;
       --warn-soft: rgba(255, 181, 71, 0.11);
-      --info: #6aa8ff;
-      --info-soft: rgba(106, 168, 255, 0.12);
-      --code-bg: #0a1829;
-      --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
-      --font-display: 'Sora', system-ui, sans-serif;
-      --font-body: 'DM Sans', system-ui, sans-serif;
+      --info: #8fb7ff;
+      --info-soft: rgba(143, 183, 255, 0.12);
+      --code-bg: #101012;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      --font-display: 'Anton', 'Arial Narrow', sans-serif;
+      --font-body: 'Inter', system-ui, sans-serif;
     }
     @media (prefers-color-scheme: light) {
       :root:not([data-theme="dark"]) {
         color-scheme: light;
-        --bg: #f4f7fb; --sidebar: #eaf0f6; --surface: #ffffff; --surface-2: #f1f5f9;
-        --hover: rgba(15, 40, 70, 0.06); --border: rgba(15, 40, 70, 0.11); --border-strong: rgba(15, 40, 70, 0.2);
-        --text: #0f1e2d; --text-dim: #5a6b7d;
-        --accent: #0a9c82; --accent-strong: #088870; --accent-soft: rgba(10, 156, 130, 0.1); --accent-contrast: #ffffff;
-        --user-bubble: linear-gradient(135deg, #1565d8, #2b85f0);
-        --danger: #d3342b; --danger-soft: rgba(211, 52, 43, 0.08);
+        --bg: #f3eee4; --sidebar: #ebe5d8; --surface: #fbf8f1; --surface-2: #e6dfd0;
+        --hover: rgba(11, 11, 12, 0.06); --border: rgba(11, 11, 12, 0.12); --border-strong: rgba(11, 11, 12, 0.22);
+        --text: #0b0b0c; --text-dim: #6b665c;
+        --accent: #e01f2d; --accent-strong: #c4121f; --accent-soft: rgba(224, 31, 45, 0.1); --accent-contrast: #ffffff;
+        --user-bubble: #0b0b0c; --user-text: #f3eee4; --flood: #0b0b0c;
+        --danger: #c4261d; --danger-soft: rgba(196, 38, 29, 0.08);
         --warn: #a76400; --warn-soft: rgba(230, 150, 20, 0.12);
         --info: #1b62cf; --info-soft: rgba(27, 98, 207, 0.08);
-        --code-bg: #eef2f7; --shadow: 0 10px 30px rgba(15, 40, 70, 0.12);
+        --code-bg: #e6dfd0; --shadow: 0 10px 30px rgba(11, 11, 12, 0.14);
       }
     }
     :root[data-theme="light"] {
       color-scheme: light;
-      --bg: #f4f7fb; --sidebar: #eaf0f6; --surface: #ffffff; --surface-2: #f1f5f9;
-      --hover: rgba(15, 40, 70, 0.06); --border: rgba(15, 40, 70, 0.11); --border-strong: rgba(15, 40, 70, 0.2);
-      --text: #0f1e2d; --text-dim: #5a6b7d;
-      --accent: #0a9c82; --accent-strong: #088870; --accent-soft: rgba(10, 156, 130, 0.1); --accent-contrast: #ffffff;
-      --user-bubble: linear-gradient(135deg, #1565d8, #2b85f0);
-      --danger: #d3342b; --danger-soft: rgba(211, 52, 43, 0.08);
+      --bg: #f3eee4; --sidebar: #ebe5d8; --surface: #fbf8f1; --surface-2: #e6dfd0;
+      --hover: rgba(11, 11, 12, 0.06); --border: rgba(11, 11, 12, 0.12); --border-strong: rgba(11, 11, 12, 0.22);
+      --text: #0b0b0c; --text-dim: #6b665c;
+      --accent: #e01f2d; --accent-strong: #c4121f; --accent-soft: rgba(224, 31, 45, 0.1); --accent-contrast: #ffffff;
+      --user-bubble: #0b0b0c; --user-text: #f3eee4; --flood: #0b0b0c;
+      --danger: #c4261d; --danger-soft: rgba(196, 38, 29, 0.08);
       --warn: #a76400; --warn-soft: rgba(230, 150, 20, 0.12);
       --info: #1b62cf; --info-soft: rgba(27, 98, 207, 0.08);
-      --code-bg: #eef2f7; --shadow: 0 10px 30px rgba(15, 40, 70, 0.12);
+      --code-bg: #e6dfd0; --shadow: 0 10px 30px rgba(11, 11, 12, 0.14);
     }
 
     /* ── Base ─────────────────────────────────────────────────────── */
@@ -423,6 +425,143 @@
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
     }
+
+    /* ── Ink & Crimson: component styling ────────────────────────── */
+    .brand-logo { background: var(--accent); border: 0; color: #fff; border-radius: 10px; box-shadow: 0 0 26px -6px var(--accent); }
+    .brand-name { font-family: var(--font-display); font-weight: 400; font-size: 21px; letter-spacing: 0.03em; text-transform: uppercase; }
+    .brand-sub { letter-spacing: 0.04em; }
+
+    .new-chat, .tool-btn, .primary-btn {
+      position: relative; overflow: hidden; isolation: isolate; border-radius: 999px;
+      font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; font-size: 12.5px;
+      transition: color 0.35s, transform 0.12s;
+    }
+    .new-chat::before, .tool-btn::before, .primary-btn::before {
+      content: ""; position: absolute; left: 50%; top: 100%; width: 170%; aspect-ratio: 1; z-index: -1;
+      border-radius: 50%; transform: translateX(-50%); transition: top 0.55s cubic-bezier(0.7, 0, 0.2, 1);
+    }
+    .new-chat { background: var(--accent); color: #fff; padding: 13px 16px; }
+    .new-chat::before { background: var(--flood); }
+    .new-chat:hover { background: var(--accent); color: var(--bg); }
+    .new-chat:hover::before, .tool-btn:hover::before, .primary-btn:hover::before { top: -35%; }
+    .tool-btn { border: 1.5px solid var(--accent); background: transparent; color: var(--text); padding: 8px 14px; }
+    .tool-btn::before { background: var(--accent); }
+    .tool-btn:hover { background: transparent; color: #fff; }
+    .primary-btn { background: var(--accent); color: #fff; padding: 12px 22px; }
+    .primary-btn::before { background: var(--flood); }
+    .primary-btn:hover { background: var(--accent); color: var(--bg); }
+
+    .select-wrap { border-radius: 999px; padding: 6px 12px; }
+    .search { border-radius: 999px; padding: 8px 14px; }
+    a.ghost-btn { text-decoration: none; }
+    .sidebar-footer { flex-wrap: wrap; }
+
+    .conv-item { border-radius: 12px; }
+    .conv-item.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+    .conv-group { letter-spacing: 0.14em; }
+    .topbar-title { font-family: var(--font-body); font-weight: 700; font-size: 15px; letter-spacing: -0.01em; }
+    .msg.kind-emergency .content {
+      background: color-mix(in srgb, var(--accent) 13%, var(--surface)); border: 1.5px solid var(--accent);
+      box-shadow: 0 0 44px -14px var(--accent), inset 5px 0 0 var(--accent);
+    }
+
+    .avatar, .msg.assistant .avatar { background: var(--accent); color: #fff; border: 0; border-radius: 11px; }
+    .msg.user .bubble { background: var(--user-bubble); color: var(--user-text); border-radius: 22px 22px 4px 22px; }
+    .content h1, .content h2, .content h3, .content h4 { font-family: var(--font-body); text-transform: none; letter-spacing: -0.02em; font-weight: 700; }
+
+    .composer { border-radius: 28px; }
+    .send-btn { border-radius: 50%; background: var(--accent); color: #fff; }
+    .send-btn:hover { background: var(--accent-strong); transform: scale(1.07); }
+    .send-btn.stop { background: var(--text); color: var(--bg); }
+    .composer:focus-within { border-color: var(--accent); }
+
+    .suggestion { border-radius: 22px; transition: background 0.3s, border-color 0.3s, transform 0.3s; }
+    .suggestion:hover { background: var(--accent); border-color: var(--accent); transform: translateY(-4px); }
+    .suggestion:hover .suggestion-label, .suggestion:hover .suggestion-text { color: #fff; }
+
+    /* Welcome screen: beating cross, ECG line, big condensed headline */
+    .welcome { position: relative; padding-top: 4vh; isolation: isolate; }
+    .welcome::before {
+      content: ""; position: absolute; left: 50%; top: -30px; width: min(520px, 90%); aspect-ratio: 1; z-index: -1;
+      transform: translateX(-50%); opacity: 0.09; animation: crossbeat 1.4s infinite;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath fill='%23ff2d3b' d='M36 4h28v32h32v28H64v32H36V64H4V36h32z'/%3E%3C/svg%3E") center / contain no-repeat;
+    }
+    @keyframes crossbeat { 14% { transform: translateX(-50%) scale(1.05); } 28% { transform: translateX(-50%); } 42% { transform: translateX(-50%) scale(1.03); } }
+    .welcome-ecg { display: block; width: min(380px, 70%); height: 54px; margin: 0 auto 18px; overflow: visible; }
+    .welcome-ecg path { fill: none; stroke: var(--accent); stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round;
+      stroke-dasharray: 520; stroke-dashoffset: 520; animation: ecgdraw 3.4s linear infinite; filter: drop-shadow(0 0 6px var(--accent)); }
+    @keyframes ecgdraw { 70%, 100% { stroke-dashoffset: 0; } }
+    .welcome h1 { font-family: var(--font-display); font-weight: 400; text-transform: uppercase; letter-spacing: 0.005em;
+      font-size: clamp(44px, 8vw, 92px); line-height: 0.95; margin: 0 0 20px; }
+    .welcome h1 em { font-family: 'Instrument Serif', serif; font-style: italic; text-transform: none; color: var(--accent); font-size: 1.04em; letter-spacing: -0.01em; }
+    .welcome p { font-size: 16.5px; }
+    @media (max-width: 860px) {
+      .select-wrap { padding: 6px 9px; gap: 4px; }
+      .select-wrap select { font-size: 13px; }
+      .top-tools { gap: 6px; }
+      .tool-btn { padding: 8px 11px; }
+    }
+    .sc-head h2 { font-family: var(--font-display); font-weight: 400; text-transform: uppercase; letter-spacing: 0.02em; font-size: 24px; }
+    dialog.sc { border-radius: 24px; }
+    .sc input[type="range"] { accent-color: var(--accent); }
+    .msg.kind-symptom_check .content { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+
+    /* ── Message box: command-bar style ──────────────────────────── */
+    @property --ang { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+    @keyframes comp-spin { to { --ang: 360deg; } }
+    [hidden] { display: none !important; }
+    .composer-wrap { padding: 6px 20px 14px; }
+    .composer {
+      position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 0; padding: 0;
+      max-width: 820px; margin: 0 auto; border-radius: 26px; border: 1px solid var(--border-strong);
+      background: linear-gradient(180deg, color-mix(in srgb, var(--surface) 90%, var(--text) 4%), var(--surface));
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 26px 60px -30px rgba(0, 0, 0, 0.75);
+      transition: border-color 0.25s, box-shadow 0.35s;
+    }
+    .composer::before {   /* a red light that travels around the edge while you type */
+      content: ""; position: absolute; inset: -1.5px; border-radius: inherit; padding: 1.5px; pointer-events: none;
+      background: conic-gradient(from var(--ang), transparent 0 55%, var(--accent) 80%, transparent 100%);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+      opacity: 0; transition: opacity 0.3s; animation: comp-spin 4s linear infinite;
+    }
+    .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 35%, var(--border-strong));
+      box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 10%, transparent), 0 28px 70px -26px color-mix(in srgb, var(--accent) 50%, transparent); }
+    .composer:focus-within::before { opacity: 1; }
+    .composer textarea { width: 100%; flex: none; padding: 20px 24px 6px; font-size: 16.5px; line-height: 1.55; min-height: 30px; max-height: 200px; }
+    .comp-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px 10px 14px; }
+    .chip-act {
+      display: inline-flex; align-items: center; gap: 8px; padding: 8px 15px 8px 12px; border-radius: 999px;
+      border: 1px solid var(--border-strong); color: var(--text-dim); font-size: 13px; font-weight: 600; letter-spacing: 0.01em;
+      transition: color 0.2s, border-color 0.2s, background 0.2s, transform 0.2s;
+    }
+    .chip-act:hover { color: var(--text); border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+    .chip-act .lbl-rec { display: none; }
+    .chip-act.recording { color: #fff; background: var(--accent); border-color: var(--accent); animation: pulse 1.4s infinite; }
+    .chip-act.recording .lbl { display: none; }
+    .chip-act.recording .lbl-rec { display: inline; }
+    .comp-hint { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+    .comp-hint kbd {
+      font: 600 11px/1 var(--font-body); padding: 5px 7px; border-radius: 7px; background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border-strong); border-bottom-width: 2px;
+    }
+    .comp-hint kbd + kbd { margin-left: -1px; }
+    .comp-hint kbd:nth-of-type(1) { margin-right: 2px; }
+    .send-btn {
+      flex: none; width: 46px; height: 46px; border-radius: 15px; margin: 0; background: var(--accent); color: #fff;
+      box-shadow: 0 10px 26px -10px var(--accent); transition: transform 0.2s, background 0.2s, box-shadow 0.2s, color 0.2s;
+    }
+    .send-btn .icon { width: 20px; height: 20px; transition: transform 0.2s; }
+    .send-btn:hover:not(:disabled) { background: var(--accent-strong); transform: translateY(-2px); }
+    .send-btn:hover:not(:disabled) .icon { transform: translateY(-2px); }
+    .send-btn:disabled { opacity: 1; cursor: default; background: var(--surface-2); color: var(--text-dim); box-shadow: none; }
+    .send-btn.stop { background: var(--text); color: var(--bg); box-shadow: none; }
+    @media (max-width: 860px) {
+      .composer-wrap { padding: 6px 12px calc(10px + env(safe-area-inset-bottom)); }
+      .comp-hint { display: none; }
+      .send-btn { margin-left: auto; }
+      .composer textarea { padding: 16px 18px 4px; }
+    }
   </style>
 </head>
 <body>
@@ -472,6 +611,7 @@
       </label>
       <nav class="conv-list" id="convList"></nav>
       <div class="sidebar-footer">
+        <a class="ghost-btn" href="/" title="Back to the home page" aria-label="Home"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 9-8 9 8M5 10v10h14V10"/></svg>Home</a>
         <button class="ghost-btn theme-toggle" id="themeBtn" aria-label="Switch theme">
           <svg class="icon"><use id="themeIcon" href="#i-sun"/></svg><span id="themeLabel">Light mode</span>
         </button>
@@ -514,18 +654,21 @@
 
       <div class="composer-wrap">
         <form class="composer" id="composer">
-          <button class="comp-btn" id="attachBtn" type="button" aria-label="Upload a report, prescription or photo" title="Upload a PDF report or a photo (max {{ max_upload_mb }} MB)">
-            <svg class="icon"><use href="#i-clip"/></svg>
-          </button>
-          <input type="file" id="fileInput" accept=".pdf,application/pdf,image/png,image/jpeg,image/webp" hidden />
           <label for="input" class="sr-only">Ask a medical question</label>
           <textarea id="input" rows="1" placeholder="Ask a medical question…" autocomplete="off"></textarea>
-          <button class="comp-btn" id="micBtn" type="button" aria-label="Speak your question" title="Speak your question" hidden>
-            <svg class="icon"><use href="#i-mic"/></svg>
-          </button>
-          <button class="send-btn" id="sendBtn" type="submit" aria-label="Send" disabled>
-            <svg class="icon"><use id="sendIcon" href="#i-send"/></svg>
-          </button>
+          <div class="comp-bar">
+            <input type="file" id="fileInput" accept=".pdf,application/pdf,image/png,image/jpeg,image/webp" hidden />
+            <button class="chip-act" id="attachBtn" type="button" aria-label="Upload a report, prescription or photo" title="Upload a PDF report or a photo (max {{ max_upload_mb }} MB)">
+              <svg class="icon"><use href="#i-clip"/></svg><span>Attach</span>
+            </button>
+            <button class="chip-act" id="micBtn" type="button" aria-label="Speak your question" title="Speak your question" hidden>
+              <svg class="icon"><use href="#i-mic"/></svg><span class="lbl">Voice</span><span class="lbl-rec">Listening…</span>
+            </button>
+            <span class="comp-hint" aria-hidden="true"><kbd>Enter</kbd> send <kbd>Shift + </kbd><kbd>Enter</kbd> new line</span>
+            <button class="send-btn" id="sendBtn" type="submit" aria-label="Send" disabled>
+              <svg class="icon"><use id="sendIcon" href="#i-send"/></svg>
+            </button>
+          </div>
         </form>
         <div class="disclaimer">Dr. Insight gives general information, not medical advice. In an emergency call 112.</div>
       </div>
@@ -775,8 +918,8 @@
     function showWelcome() {
       threadInner.innerHTML = `
         <div class="welcome">
-          <div class="welcome-logo"><svg class="icon" style="width:28px;height:28px"><use href="#i-cross"/></svg></div>
-          <h1>How can I help you today?</h1>
+          <svg class="welcome-ecg" viewBox="0 0 200 54" aria-hidden="true"><path d="M0 30h62l8-8 8 8h14l6 10 9-30 9 38 7-18h77"/></svg>
+          <h1>How can I help <em>you</em> today?</h1>
           <p>Ask about symptoms, conditions or medicines in English or an Indian language, by typing or speaking.
              Answers come from trusted medical sources (encyclopedia, pharmacology textbook, MedlinePlus, WHO), with the sources shown.</p>
           <div class="suggestions">
@@ -1324,6 +1467,16 @@
     });
 
     // ── Start ────────────────────────────────────────────────
+    // Rotate example prompts in the empty message box (a hint of what you can ask, incl. Hindi)
+    const EXAMPLES = ['Ask a medical question…', 'What are the side effects of metformin?', 'मधुमेह के लक्षण क्या हैं?',
+      'Explain my lab report in simple words', 'How is high blood pressure treated?', 'What does HbA1c measure?'];
+    let exampleIndex = 0;
+    setInterval(() => {
+      if (document.activeElement === input || input.value) return;
+      exampleIndex = (exampleIndex + 1) % EXAMPLES.length;
+      input.placeholder = EXAMPLES[exampleIndex];
+    }, 3600);
+
     (async () => {
       await loadConversations();
       const id = new URLSearchParams(location.search).get('c');
