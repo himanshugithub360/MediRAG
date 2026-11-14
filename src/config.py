@@ -56,7 +56,7 @@ LLM_TEMPERATURE = 0.2
 
 # ── Retrieval ────────────────────────────────────────────────────────────────
 # "full": local PyTorch models, BM25 keyword search and cross-encoder reranking (best quality,
-#         needs ~2 GB RAM). "lite": ONNX query embedding + Pinecone vector search + Pinecone's
+#         peaks near 1 GB RAM). "lite": ONNX query embedding + Pinecone vector search + Pinecone's
 #         hosted reranker; fits the 512 MB / 0.1 CPU Render free tier (see src/retrieval_lite.py).
 RETRIEVER = _env("RETRIEVER", "full").lower()                                # (env)
 RERANK_MODEL = _env("RERANK_MODEL", "bge-reranker-v2-m3")                   # (env) lite: hosted reranker

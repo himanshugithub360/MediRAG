@@ -2,7 +2,7 @@
 #
 # Same app as the main Dockerfile, with RETRIEVER=lite: the question is embedded with an
 # ONNX copy of the index's model (no PyTorch) and reranked by Pinecone's hosted reranker.
-# Uses about 250 MB of RAM. API keys are set in the Render dashboard, never in the image.
+# Uses about 240 MB of RAM (resident; the full image peaks near 1 GB. Measured on a laptop). API keys are set in the Render dashboard, never in the image.
 #
 #   docker build -f Dockerfile.render -t medirag-lite .
 #   docker run --env-file .env -p 10000:10000 medirag-lite      -> http://localhost:10000

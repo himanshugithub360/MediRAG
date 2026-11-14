@@ -300,7 +300,7 @@ Every message passes [`src/safety.py`](src/safety.py) **before** the AI sees it:
 Live at **[medirag-k33w.onrender.com](https://medirag-k33w.onrender.com)** on Render's free tier: **₹0, no credit card.**
 
 > [!NOTE]
-> Render's free tier has **512 MB RAM and 0.1 CPU**, too small for PyTorch. So it runs **lite mode** ([`src/retrieval_lite.py`](src/retrieval_lite.py)): the **same** embedding model through ONNX (identical vectors, no re-index), Pinecone search and Pinecone's **hosted reranker** (500 free per month, then vector order). **~240 MB RAM · MRR 0.82**, with every feature intact.
+> Render's free tier has **512 MB RAM and 0.1 CPU**, too small for PyTorch. So it runs **lite mode** ([`src/retrieval_lite.py`](src/retrieval_lite.py)): the **same** embedding model through ONNX (identical vectors, no re-index), Pinecone search and Pinecone's **hosted reranker** (500 free per month, then vector order). **~240 MB RAM** (about 4x less than the ~1 GB peak of full mode, measured locally) **· MRR 0.82**, with every feature intact.
 
 1. Sign up at **[dashboard.render.com](https://dashboard.render.com/register)** with GitHub.
 2. **New + → Blueprint** → choose this repo. Render reads [`render.yaml`](render.yaml).
@@ -316,8 +316,10 @@ Live at **[medirag-k33w.onrender.com](https://medirag-k33w.onrender.com)** on Re
 
 | Image | For | RAM |
 |---|---|---|
-| [`Dockerfile`](Dockerfile) | Full quality on your own machine | ~2 GB |
+| [`Dockerfile`](Dockerfile) | Full quality on your own machine | ~1 GB (peak) |
 | [`Dockerfile.render`](Dockerfile.render) | Free hosting (lite) | ~240 MB |
+
+<sub>RAM is resident memory measured on a Windows laptop after several searches: the full stack peaks near 1 GB, lite about 270 MB (steady state ~240 MB). It has not been measured on Render itself; check the service's **Metrics** tab.</sub>
 
 ```bash
 docker build -t medirag .
